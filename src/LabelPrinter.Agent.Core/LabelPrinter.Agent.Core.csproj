@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>LabelPrinter.Agent.Core</RootNamespace>
+    <IsAotCompatible>false</IsAotCompatible>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="LabelPrinter.Agent.Core.Tests" />
+  </ItemGroup>
+</Project>

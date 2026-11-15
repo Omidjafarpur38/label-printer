@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Dependency-free test executable (no NuGet packages): the xUnit package set is pending approval, see docs/tooling.md. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>LabelPrinter.Agent.Core.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\LabelPrinter.Agent.Core\LabelPrinter.Agent.Core.csproj" />
+  </ItemGroup>
+</Project>
