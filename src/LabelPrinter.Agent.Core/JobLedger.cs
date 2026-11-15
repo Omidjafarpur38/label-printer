@@ -257,6 +257,22 @@ public sealed class JobLedger : IDisposable
         }
     }
 
+    /// <summary>
+    /// Gives up a job that was never handed to a spooler (Accepted -> Failed). Returns false, changing nothing,
+    /// in any other state: a job that may have reached a spooler cannot be declared failed.
+    /// </summary>
+    public bool Abandon(Guid jobId, string reasonCode)
+    {
+        lock (_gate)
+        {
+            EnsureUsable();
+            var job = Require(jobId);
+            if (job.State != JobState.Accepted) return false;
+            FailBeforeSubmission(job, reasonCode);
+            return true;
+        }
+    }
+
     /// <summary>Records completion. Allowed from SubmittedToSpooler or Unknown, and only with evidence.</summary>
     public void ConfirmCompleted(Guid jobId, Evidence evidence)
     {
