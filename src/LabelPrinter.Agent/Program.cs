@@ -33,7 +33,8 @@ internal static class Program
                                           pair with an ERP; the pairing code is asked for, never passed as an argument
           unpair                          delete the stored credential (journal and settings are kept)
           run                             run in the foreground until Ctrl+C
-          stop                            ask a running agent to stop
+          stop [--wait SECONDS]           ask a running agent to stop (and wait until it has)
+          selftest                        local checks only: credential protection, file locking; no ERP, no printer
           autostart enable|disable|status start in the background at logon for this user (off by default)
           recover --clear-quarantine --yes
                                           operator recovery after a suspected journal rollback (see docs/recovery.md)
@@ -60,7 +61,8 @@ internal static class Program
                 "pair" => Pair(host, args),
                 "unpair" => Unpair(host),
                 "run" => RunForeground(host),
-                "stop" => host.SignalStop() ? Print("stop requested") : Fail(1, "no running agent found for this data directory"),
+                "stop" => Stop(host, args),
+                "selftest" => SelfTest(),
                 "autostart" => AutostartCommand(args),
                 "recover" => Recover(host, args),
                 "spool-file" => SpoolFile(args),
@@ -230,6 +232,70 @@ internal static class Program
         using var cancel = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cancel.Cancel(); };
         return host.Run(echo: true, cancel.Token);
+    }
+
+    private static int Stop(AgentHost host, string[] args)
+    {
+        var wait = int.Parse(Option(args, "--wait") ?? "0", CultureInfo.InvariantCulture);
+        if (!host.IsRunning()) return Print("not running");
+        if (!host.SignalStop()) return Fail(1, "an agent holds the journal but could not be signalled");
+        for (var i = 0; i < wait * 4 && host.IsRunning(); i++) Thread.Sleep(250);
+        if (wait > 0 && host.IsRunning()) return Fail(1, $"still running after {wait}s (it finishes its current ERP call first)");
+        return Print(wait > 0 ? "stopped" : "stop requested");
+    }
+
+    /// <summary>Checks the pieces that depend on this machine, in a temporary directory. Touches no ERP, no
+    /// printer, no registry and none of the agent's real data.</summary>
+    private static int SelfTest()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "lpagent-selftest-" + Guid.NewGuid().ToString("N"));
+        var failures = 0;
+        void Step(string name, Action check)
+        {
+            try { check(); Console.WriteLine("ok    " + name); }
+            catch (Exception ex) { failures++; Console.WriteLine($"FAIL  {name}: {ex.GetType().Name} {ex.Message}"); }
+        }
+        try
+        {
+            var host = new AgentHost(dir);
+            host.EnsureDataDir();
+            // Shaped like a credential but made of fixed filler bytes; it authenticates nowhere.
+            var synthetic = AgentCredential.Scheme + "_" + new string('A', 22) + "." + new string('B', 43);
+            Step("credential is stored protected and read back", () =>
+            {
+                var store = host.Identities();
+                var now = DateTimeOffset.UtcNow;
+                store.SavePairing(new AgentIdentity("https://selftest.invalid", Guid.NewGuid(), store.InstallId(), "selftest", ContractInfo.V0_1, now, now, 30, 20), synthetic);
+                if (store.Current()?.ToAuthorizationHeader() != "Bearer " + synthetic) throw new InvalidOperationException("round trip mismatch");
+                var onDisk = File.ReadAllBytes(Path.Combine(dir, "credential.bin"));
+                if (OperatingSystem.IsWindows() && Encoding.ASCII.GetString(onDisk).Contains(new string('B', 43), StringComparison.Ordinal))
+                    throw new InvalidOperationException("credential is readable in the file");
+            });
+            Step("journal has a single owner", () =>
+            {
+                using var first = new FileJournalStore(Path.Combine(dir, "journal.lpj"));
+                try { using var second = new FileJournalStore(Path.Combine(dir, "journal.lpj")); }
+                catch (JournalLockedException) { return; }
+                throw new InvalidOperationException("second writer was not refused");
+            });
+            Step("journal survives reopen and refuses another origin", () =>
+            {
+                var agent = Guid.NewGuid();
+                JobLedger.Open(new FileJournalStore(Path.Combine(dir, "j2.lpj")), new FileBlobStore(Path.Combine(dir, "p2")), agent, "https://a.invalid", TimeProvider.System, Guid.NewGuid, out _).Dispose();
+                JobLedger.Open(new FileJournalStore(Path.Combine(dir, "j2.lpj")), new FileBlobStore(Path.Combine(dir, "p2")), agent, "https://a.invalid", TimeProvider.System, Guid.NewGuid, out _).Dispose();
+                try { JobLedger.Open(new FileJournalStore(Path.Combine(dir, "j2.lpj")), new FileBlobStore(Path.Combine(dir, "p2")), agent, "https://b.invalid", TimeProvider.System, Guid.NewGuid, out _).Dispose(); }
+                catch (JournalMismatchException) { return; }
+                throw new InvalidOperationException("journal of another origin was accepted");
+            });
+            if (OperatingSystem.IsWindows())
+                Step("print queues can be listed", () => Console.WriteLine($"      {AgentHost.Queues().Count} queue(s) visible"));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { failures++; Console.WriteLine("FAIL  cleanup: " + ex.Message); }
+        }
+        Console.WriteLine(failures == 0 ? "selftest passed" : $"selftest failed ({failures})");
+        return failures == 0 ? 0 : 1;
     }
 
     private static int AutostartCommand(string[] args)

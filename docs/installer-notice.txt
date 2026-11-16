@@ -1,0 +1,30 @@
+LABEL PRINTER AGENT - EXPERIMENTAL, UNSIGNED PRERELEASE
+
+Please read before installing.
+
+1. This installer is NOT digitally signed. Windows will show "Unknown publisher"
+   and Microsoft Defender SmartScreen may show "Windows protected your PC".
+   That warning is expected for this build. Do not switch off Defender or
+   SmartScreen. Only continue if you downloaded the file from the official page
+   and its SHA-256 matches the value published there.
+
+2. This is a test build. It has not been verified with a physical label printer
+   unless the release notes of this exact version say so.
+
+3. Installing does nothing by itself: it does not pair with an ERP, does not
+   start in the background, does not register autostart and does not print.
+   You pair, select one printer and start the agent yourself.
+
+4. The agent sends RAW printer commands produced by the ERP, unchanged, to the
+   one print queue you select. Selecting a printer that does not understand the
+   chosen language (TSPL or ZPL) can waste labels or print garbage.
+
+5. Your data (job journal, pairing credential, settings) is kept in
+   %LOCALAPPDATA%\LabelPrinterAgent. Upgrading keeps it. Uninstalling keeps it
+   unless you explicitly choose to delete it.
+
+6. A "submitted to spooler" state means Windows accepted the job. It is not
+   proof that a label was printed. Jobs whose outcome is unknown are never sent
+   again automatically.
+
+See setup-guide.md in the installation folder after installing.

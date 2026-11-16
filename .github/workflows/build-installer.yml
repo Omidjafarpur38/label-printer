@@ -1,0 +1,91 @@
+name: build-installer
+
+# Builds the self-contained win-x64 agent and its installer, then installs, upgrades and uninstalls it on the
+# clean Windows runner. Reusable: ci.yml calls it for every change, release.yml for a tagged version.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+    outputs:
+      installer-name:
+        value: ${{ jobs.build.outputs.installer-name }}
+      sha256:
+        value: ${{ jobs.build.outputs.sha256 }}
+      size:
+        value: ${{ jobs.build.outputs.size }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    outputs:
+      installer-name: ${{ steps.hash.outputs.name }}
+      sha256: ${{ steps.hash.outputs.sha256 }}
+      size: ${{ steps.hash.outputs.size }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Publish (self-contained, win-x64)
+        shell: pwsh
+        run: |
+          # The lock files cover package references (there are none). The runtime pack needed for a
+          # self-contained build is a Microsoft SDK download and is restored here without the lock.
+          foreach ($p in 'LabelPrinter.Agent', 'LabelPrinter.Agent.Background') {
+            dotnet publish "src/$p" -c Release -r win-x64 --self-contained true -p:Version=${{ inputs.version }} -p:RestorePackagesWithLockFile=false -o publish
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          }
+          & publish/LabelPrinterAgent.exe version
+          Get-Content publish/LabelPrinterAgent.runtimeconfig.json
+      - name: Locate Inno Setup
+        id: inno
+        shell: pwsh
+        run: ./tools/windows/Find-InnoSetup.ps1
+      - name: Build installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          & "${{ steps.inno.outputs.iscc }}" "/DAppVersion=${{ inputs.version }}" "/DPublishDir=$PWD\publish" "/DOutputDir=$PWD\out" installer\LabelPrinterAgent.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Build a second installer with a higher version (for the upgrade test only; not published)
+        shell: pwsh
+        run: |
+          foreach ($p in 'LabelPrinter.Agent', 'LabelPrinter.Agent.Background') {
+            dotnet publish "src/$p" -c Release -r win-x64 --self-contained true -p:Version=99.0.0-upgradetest -p:RestorePackagesWithLockFile=false -o publish-next
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          }
+          New-Item -ItemType Directory -Force out-next | Out-Null
+          & "${{ steps.inno.outputs.iscc }}" "/DAppVersion=99.0.0-upgradetest" "/DPublishDir=$PWD\publish-next" "/DOutputDir=$PWD\out-next" installer\LabelPrinterAgent.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Install, upgrade and uninstall smoke test
+        shell: pwsh
+        run: ./tools/windows/Test-Installer.ps1 -Installer (Get-ChildItem out\*.exe).FullName -NextInstaller (Get-ChildItem out-next\*.exe).FullName -Version '${{ inputs.version }}'
+      - name: Hash the exact installer bytes
+        id: hash
+        shell: pwsh
+        run: |
+          $f = Get-ChildItem out\*.exe
+          $h = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$h  $($f.Name)" | Set-Content -NoNewline -Encoding ascii out\SHA256SUMS.txt
+          "name=$($f.Name)" >> $env:GITHUB_OUTPUT
+          "sha256=$h" >> $env:GITHUB_OUTPUT
+          "size=$($f.Length)" >> $env:GITHUB_OUTPUT
+          $sig = Get-AuthenticodeSignature $f.FullName
+          "Authenticode status: $($sig.Status)  (expected: NotSigned)"
+          if ($sig.Status -ne 'NotSigned') { throw "unexpected signature status" }
+          "$($f.Name)  $($f.Length) bytes  sha256 $h"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installer
+          path: |
+            out/*.exe
+            out/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14

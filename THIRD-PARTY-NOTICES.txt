@@ -1,0 +1,14 @@
+Label Printer Agent includes or is built with the following third-party components.
+
+.NET runtime (self-contained deployment: files under the installation folder other than
+LabelPrinterAgent*.*, setup-guide.md, recovery.md and the notice files)
+  Copyright (c) .NET Foundation and Contributors
+  License: MIT - https://github.com/dotnet/runtime/blob/main/LICENSE.TXT
+  Third-party notices of the runtime: https://github.com/dotnet/runtime/blob/main/THIRD-PARTY-NOTICES.TXT
+
+Inno Setup (used to build the installer; the uninstaller is part of it)
+  Copyright (C) 1997-2026 Jordan Russell. Portions Copyright (C) 2000-2026 Martijn Laan.
+  License: Inno Setup License - https://jrsoftware.org/files/is/license.txt
+  https://jrsoftware.org/isinfo.php
+
+The agent itself has no NuGet package dependencies.
