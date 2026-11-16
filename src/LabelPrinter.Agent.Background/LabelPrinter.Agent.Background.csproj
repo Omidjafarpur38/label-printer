@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Same sources as the console front end, built without a console window. It only runs the agent loop
+       and is what opt-in autostart launches. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>LabelPrinterAgentBg</AssemblyName>
+    <RootNamespace>LabelPrinter.Agent</RootNamespace>
+    <DefineConstants>$(DefineConstants);BACKGROUND</DefineConstants>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\LabelPrinter.Agent\**\*.cs" Exclude="..\LabelPrinter.Agent\bin\**;..\LabelPrinter.Agent\obj\**" LinkBase="Shared" />
+    <ProjectReference Include="..\LabelPrinter.Agent.Core\LabelPrinter.Agent.Core.csproj" />
+  </ItemGroup>
+</Project>

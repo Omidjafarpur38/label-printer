@@ -15,6 +15,8 @@ public enum RunnerStop
 public sealed record RunnerOptions
 {
     public TimeSpan IdleDelay { get; init; } = TimeSpan.FromSeconds(1);
+    /// <summary>The ERP answers claims immediately while label printing is switched off for the tenant.</summary>
+    public TimeSpan PausedDelay { get; init; } = TimeSpan.FromSeconds(30);
     public TimeSpan BackoffBase { get; init; } = TimeSpan.FromSeconds(2);
     public TimeSpan BackoffCap { get; init; } = TimeSpan.FromMinutes(5);
     public TimeSpan ForbiddenDelay { get; init; } = TimeSpan.FromMinutes(5);
@@ -60,6 +62,7 @@ public sealed class AgentRunner(
         ErpException? failure = null;
         var unavailable = false;
         var didWork = false;
+        var paused = false;
         try
         {
             if (clock.GetUtcNow() >= _nextHeartbeat)
@@ -81,6 +84,7 @@ public sealed class AgentRunner(
             failure = report.ErpFailure;
             unavailable = report.ErpUnavailable && failure is null;
             didWork |= report.DidWork;
+            paused = report.Paused;
             if (failure is null && !unavailable) ConfirmCredential();
         }
 
@@ -127,7 +131,7 @@ public sealed class AgentRunner(
         }
 
         _failures = 0;
-        LastDelay = didWork ? TimeSpan.FromMilliseconds(200) : _o.IdleDelay;
+        LastDelay = didWork ? TimeSpan.FromMilliseconds(200) : paused ? _o.PausedDelay : _o.IdleDelay;
         return null;
     }
 
