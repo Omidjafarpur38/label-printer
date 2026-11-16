@@ -38,7 +38,8 @@ public sealed class Bench
     public SyncReport Cycle() => Sync.RunCycle();
     public JobState Local(Guid id) => R.Ledger.Find(id)!.State;
     public string Server(Guid id) => Erp.Job(id).State;
-    public int Prints => R.Spooler.Submissions.Count;
+    /// <summary>Calls received by the fake spooler. Says nothing about paper.</summary>
+    public int FakeSubmissions => R.Spooler.Submissions.Count;
 
     public void FailNextJournalAppend()
     {
@@ -63,14 +64,14 @@ public sealed class ClaimAndAcceptanceTests
         var report = _b.Cycle();
         Check.True(report.Has(SyncReport.Accepted, id) && report.Has(SyncReport.Submitted, id), "cycle notes");
         Check.Equal("submitted_to_spooler", _b.Server(id), "ERP sees the spooler acknowledgement, not completion");
-        Check.Equal(1, _b.Prints, "printed once");
+        Check.Equal(1, _b.FakeSubmissions, "submitted to fake spooler once");
         _b.OutboxEmpty();
 
         _b.R.Ledger.ConfirmCompleted(id, new Evidence(Evidence.SpoolerReportedComplete, "queue empty"));
         _b.Cycle();
         Check.Equal("confirmed_completed", _b.Server(id), "completion with evidence");
         Check.Equal(Evidence.SpoolerReportedComplete, _b.Erp.Job(id).AgentEvents.Last().EvidenceLevel, "evidence reached the ERP");
-        Check.Equal(1, _b.Prints, "still once");
+        Check.Equal(1, _b.FakeSubmissions, "still one fake-spooler submission");
     }
 
     [Test] public void ErpIsNotToldAcceptedBeforeTheJournalHoldsTheJob()
@@ -80,26 +81,26 @@ public sealed class ClaimAndAcceptanceTests
         Check.Throws<JournalWriteException>(() => _b.Cycle(), "storage failure surfaces");
         Check.Equal(0, _b.Erp.CallCount("accept"), "no acknowledgement without durable acceptance");
         Check.Equal("delivered", _b.Server(id), "ERP still waits");
-        Check.Equal(0, _b.Prints, "nothing printed");
+        Check.Equal(0, _b.FakeSubmissions, "nothing submitted");
 
         _b.R.Clock.Advance(TimeSpan.FromSeconds(61)); // lease expires, ERP redelivers the same job
         _b.Cycle();
         Check.Equal(2, _b.Erp.Job(id).DeliveryAttempts, "redelivered");
         Check.Equal("submitted_to_spooler", _b.Server(id), "second delivery completes");
-        Check.Equal(1, _b.Prints, "printed once");
+        Check.Equal(1, _b.FakeSubmissions, "submitted to fake spooler once");
     }
 
-    [Test] public void NothingIsPrintedUntilTheErpConfirmsAcceptance()
+    [Test] public void NothingIsSubmittedUntilTheErpConfirmsAcceptance()
     {
         var id = _b.Enqueue();
         _b.Erp.FailNext("accept", MockErp.Fault.RequestLost);
         var report = _b.Cycle();
         Check.True(report.ErpUnavailable, "reported");
         Check.Equal(JobState.Accepted, _b.Local(id), "durably accepted, waiting");
-        Check.Equal(0, _b.Prints, "not printed without confirmation");
+        Check.Equal(0, _b.FakeSubmissions, "not submitted without confirmation");
 
         _b.Cycle();
-        Check.Equal(1, _b.Prints, "printed after confirmation");
+        Check.Equal(1, _b.FakeSubmissions, "submitted to fake spooler after confirmation");
         Check.Equal("submitted_to_spooler", _b.Server(id), "state");
     }
 
@@ -112,7 +113,7 @@ public sealed class ClaimAndAcceptanceTests
         Check.Equal(1, _b.R.Ledger.PendingAccepts().Count, "agent does not know yet");
         _b.Cycle();
         Check.Equal(2, _b.Erp.CallCount("accept"), "retried once");
-        Check.Equal(1, _b.Prints, "printed once");
+        Check.Equal(1, _b.FakeSubmissions, "submitted to fake spooler once");
         _b.OutboxEmpty();
     }
 
@@ -128,7 +129,7 @@ public sealed class ClaimAndAcceptanceTests
         _b.R.Clock.Advance(TimeSpan.FromSeconds(61));
         _b.Cycle();
         Check.Equal(2, _b.R.Ledger.Find(id)!.DeliveryAttempt, "second delivery attempt");
-        Check.Equal(1, _b.Prints, "printed once");
+        Check.Equal(1, _b.FakeSubmissions, "submitted to fake spooler once");
     }
 
     [Test] public void LeaseLostIsRepairedByReconcileNotByGuessing()
@@ -139,10 +140,10 @@ public sealed class ClaimAndAcceptanceTests
         _b.Erp.Job(id).DeliveryAttempts = 2; // a redelivery whose claim response never arrived
 
         _b.Cycle();
-        Check.Equal(0, _b.Prints, "LEASE_LOST: wait");
+        Check.Equal(0, _b.FakeSubmissions, "LEASE_LOST: wait");
         Check.Equal(JobState.Accepted, _b.Local(id), "kept, not failed");
         _b.Cycle(); // reconcile → implicit ack on the server → accept answered as duplicate
-        Check.Equal(1, _b.Prints, "printed once");
+        Check.Equal(1, _b.FakeSubmissions, "submitted to fake spooler once");
         Check.Equal("submitted_to_spooler", _b.Server(id), "state");
     }
 
@@ -152,31 +153,48 @@ public sealed class ClaimAndAcceptanceTests
         _b.Erp.CorruptPayloadDownloads = 1;
         _b.Cycle();
         Check.Equal(2, _b.Erp.CallCount("payload"), "one refetch");
-        Check.True(_b.R.Spooler.Submissions.Single().Payload.AsSpan().SequenceEqual(Rig.Payload(1)), "approved bytes printed");
+        Check.True(_b.R.Spooler.Submissions.Single().Payload.AsSpan().SequenceEqual(Rig.Payload(1)), "approved bytes submitted");
     }
 
-    [Test] public void PersistentlyCorruptPayloadIsNeverAcceptedOrPrinted()
+    [Test] public void PersistentlyCorruptPayloadIsRefusedAndReportedFailed()
     {
         var id = _b.Enqueue();
         _b.Erp.CorruptPayloadDownloads = 2;
         var report = _b.Cycle();
-        Check.True(report.Has(SyncReport.Rejected, id), "reported");
-        Check.True(_b.R.Ledger.Find(id) is null, "not accepted");
-        Check.Equal(0, _b.Erp.CallCount("accept"), "not acknowledged");
-        Check.Equal(0, _b.Prints, "not printed");
+        Check.True(report.Has(SyncReport.Rejected, id), "reported locally");
+        Check.Equal(JobState.Failed, _b.Local(id), "refusal is durable");
+        Check.Equal(0, _b.Erp.CallCount("accept"), "never acknowledged as accepted");
+        Check.Equal("failed", _b.Server(id), "ERP is told, instead of drifting to unknown");
+        Check.Equal("PAYLOAD_HASH_MISMATCH", _b.Erp.Job(id).AgentEvents.Single().ErrorCode, "with the reason");
+        Check.Equal(0, _b.FakeSubmissions, "not submitted");
+        _b.Restart();
+        _b.Cycle();
+        Check.Equal(1, _b.Erp.Job(id).AgentEvents.Count, "reported once");
     }
 
-    [Test] public void InvalidEnvelopeIsRejectedBeforeAnyDownload()
+    [Test] public void InvalidEnvelopeIsRefusedBeforeAnyDownloadAndReportedFailed()
     {
         var payload = Rig.Payload();
         _b.Erp.Enqueue(Rig.Envelope(payload) with { ContractVersion = "9.9" }, payload);
         var report = _b.Cycle();
-        Check.True(report.Has(SyncReport.Rejected, Rig.JobId(1)), "reported");
+        Check.True(report.Has(SyncReport.Rejected, Rig.JobId(1)), "reported locally");
         Check.Equal(0, _b.Erp.CallCount("payload"), "no download");
-        Check.Equal(0, _b.Prints, "not printed");
+        Check.Equal("failed", _b.Server(Rig.JobId(1)), "ERP is told");
+        Check.Equal("ENVELOPE_INVALID", _b.Erp.Job(Rig.JobId(1)).AgentEvents.Single().ErrorCode, "with the reason");
+        Check.Equal(0, _b.FakeSubmissions, "not submitted");
     }
 
-    [Test] public void SameJobIdWithDifferentContentIsNeverPrinted()
+    [Test] public void EnvelopeForAnotherAgentIsNotRecordedOrReported()
+    {
+        var payload = Rig.Payload();
+        _b.Erp.Enqueue(Rig.Envelope(payload) with { AgentId = Guid.NewGuid() }, payload);
+        var report = _b.Cycle();
+        Check.True(report.Has(SyncReport.Rejected, Rig.JobId(1)), "noted");
+        Check.Equal(0, _b.R.Ledger.Jobs().Count, "no record under an identity that is not ours");
+        Check.Equal(0, _b.Erp.CallCount("events"), "nothing reported");
+    }
+
+    [Test] public void SameJobIdWithDifferentContentIsNeverSubmitted()
     {
         var id = _b.Enqueue();
         _b.Erp.FailNext("accept", MockErp.Fault.RequestLost);
@@ -190,7 +208,7 @@ public sealed class ClaimAndAcceptanceTests
         Check.True(report.Has(SyncReport.Conflict, id), "reported");
         _b.Cycle();
         Check.Equal(JobState.Failed, _b.Local(id), "stopped");
-        Check.Equal(0, _b.Prints, "neither version printed");
+        Check.Equal(0, _b.FakeSubmissions, "neither version submitted");
     }
 
     [Test] public void PausedErpDeliversNothing()
@@ -207,7 +225,7 @@ public sealed class ClaimAndAcceptanceTests
         _b.Enqueue(copies: 7);
         _b.Cycle();
         _b.Cycle();
-        Check.Equal(1, _b.Prints, "one submission for seven copies");
+        Check.Equal(1, _b.FakeSubmissions, "one submission for seven copies");
     }
 }
 
@@ -227,7 +245,7 @@ public sealed class EventDeliveryTests
         _b.OutboxEmpty();
         Check.Equal(2, _b.Erp.Job(id).AgentEvents.Count, "same event ids: nothing stored twice");
         Check.Sequence([1, 2], _b.Erp.Job(id).AgentEvents.Select(e => e.Seq), "sequence");
-        Check.Equal(1, _b.Prints, "printed once");
+        Check.Equal(1, _b.FakeSubmissions, "submitted to fake spooler once");
     }
 
     [Test] public void EventsSurviveOutageAndRestartWithStableIds()
@@ -244,7 +262,7 @@ public sealed class EventDeliveryTests
         _b.Cycle();
         Check.Sequence(owed, _b.Erp.Job(id).AgentEvents.Select(e => e.EventId), "the same events arrive after restart");
         _b.OutboxEmpty();
-        Check.Equal(1, _b.Prints, "printed once");
+        Check.Equal(1, _b.FakeSubmissions, "submitted to fake spooler once");
     }
 
     [Test] public void ReconcileTrimsEventsTheErpAlreadyHas()
@@ -259,7 +277,7 @@ public sealed class EventDeliveryTests
         Check.Equal(before, _b.Erp.CallCount("events"), "nothing needed resending");
     }
 
-    [Test] public void RejectedEventsBlockThatJobAndAreReported()
+    [Test] public void RejectedEventsBlockThatJobDurablyAndAreRetriedWithBackoff()
     {
         var id = _b.Enqueue();
         _b.R.Spooler.OnSubmit = _ => _b.Erp.Down = true;
@@ -270,10 +288,20 @@ public sealed class EventDeliveryTests
         var report = _b.Cycle();
         Check.True(report.Has(SyncReport.Blocked, id), "reported");
         Check.Equal(2, _b.R.Ledger.PendingEvents().Count, "kept, not dropped");
+        Check.Equal("TRANSITION_INVALID", _b.R.Ledger.Find(id)!.Block!.Code, "diagnosable");
         var calls = _b.Erp.CallCount("events");
         _b.Cycle();
-        Check.Equal(calls, _b.Erp.CallCount("events"), "not hammered until the next reconcile");
-        Check.Equal(JobState.SubmittedToSpooler, _b.Local(id), "local truth unchanged");
+        _b.Restart();
+        _b.Cycle();
+        Check.Equal(calls, _b.Erp.CallCount("events"), "no busy retry, not even across a restart");
+
+        _b.Erp.Job(id).State = "accepted_by_agent"; // the server-side cause is fixed
+        _b.R.Clock.Advance(TimeSpan.FromSeconds(61));
+        _b.Cycle();
+        _b.OutboxEmpty();
+        Check.True(_b.R.Ledger.Find(id)!.Block is null, "block cleared by a real acknowledgement");
+        Check.Equal(JobState.SubmittedToSpooler, _b.Local(id), "local truth unchanged throughout");
+        Check.Equal(1, _b.FakeSubmissions, "one fake-spooler submission");
     }
 
     [Test] public void OnlyEventsCoveredByTheAnswerAreAcknowledged()
@@ -286,20 +314,41 @@ public sealed class EventDeliveryTests
         _b.Restart();
         _b.Cycle();
         _b.OutboxEmpty();
-        Check.Equal(1, _b.Prints, "printed once");
+        Check.Equal(1, _b.FakeSubmissions, "submitted to fake spooler once");
     }
 
-    [Test] public void EventsForAJobTheErpForgotAreDroppedFromTheOutboxOnly()
+    [Test] public void NotFoundIsNeverAnAcknowledgementAndEventsSurviveUntilTheErpKnowsTheJobAgain()
     {
         var id = _b.Enqueue();
         _b.R.Spooler.OnSubmit = _ => _b.Erp.Down = true;
         _b.Cycle();
         _b.Erp.Down = false;
-        _b.Erp.Remove(id);
+        var owed = _b.R.Ledger.PendingEvents().Select(e => (e.EventId, e.Seq)).ToList();
+        var gone = _b.Erp.Remove(id); // e.g. the agent is pointed at the wrong ERP database
+
         var report = _b.Cycle();
-        Check.True(report.Has(SyncReport.Anomaly, id), "reported");
-        Check.Equal(0, _b.R.Ledger.PendingEvents().Count, "outbox cleared");
-        Check.Equal(JobState.SubmittedToSpooler, _b.Local(id), "journal keeps the history");
+        Check.True(report.Has(SyncReport.Blocked, id), "reported");
+        Check.Equal("JOB_NOT_FOUND", _b.R.Ledger.Find(id)!.Block!.Code, "diagnosable");
+        Check.Sequence(owed, _b.R.Ledger.PendingEvents().Select(e => (e.EventId, e.Seq)), "nothing dropped");
+
+        var calls = _b.Erp.CallCount("events");
+        for (var i = 0; i < 3; i++) { _b.Cycle(); _b.Restart(); }
+        Check.Equal(calls, _b.Erp.CallCount("events"), "no busy retry inside the backoff window");
+        Check.Equal(1, _b.R.Ledger.Find(id)!.Block!.Count, "block survives restarts");
+
+        _b.R.Clock.Advance(TimeSpan.FromSeconds(61));
+        _b.Cycle();
+        Check.Equal(2, _b.R.Ledger.Find(id)!.Block!.Count, "still 404: blocked again, longer backoff");
+        _b.R.Clock.Advance(TimeSpan.FromSeconds(61));
+        _b.Cycle();
+        Check.Equal(calls + 1, _b.Erp.CallCount("events"), "second retry waits two minutes");
+
+        _b.Erp.Restore(gone);
+        _b.R.Clock.Advance(TimeSpan.FromMinutes(2));
+        _b.Cycle();
+        Check.Sequence(owed, _b.Erp.Job(id).AgentEvents.Select(e => (e.EventId, e.Seq)), "same event ids and sequence numbers arrive");
+        _b.OutboxEmpty();
+        Check.Equal(1, _b.FakeSubmissions, "never resubmitted to the fake spooler");
     }
 
     [Test] public void ErpOutageNeverThrowsAndNeverBlocksLocalTruth()
@@ -326,11 +375,11 @@ public sealed class ReconciliationAndRestartTests
         Check.Throws<JournalWriteException>(() => _b.Cycle(), "intent could not be persisted");
         Check.Equal(JobState.Accepted, _b.Local(id), "fixture: accepted");
         Check.Equal("accepted_by_agent", _b.Server(id), "fixture: confirmed by ERP");
-        Check.Equal(0, _b.Prints, "fixture: not printed");
+        Check.Equal(0, _b.FakeSubmissions, "fixture: not submitted");
         return id;
     }
 
-    [Test] public void CrashDuringSubmissionEndsAsUnknownOnBothSidesAndIsNeverReprinted()
+    [Test] public void CrashDuringSubmissionEndsAsUnknownOnBothSidesAndIsNeverResubmitted()
     {
         var id = _b.Enqueue();
         byte[]? atCrash = null;
@@ -345,11 +394,11 @@ public sealed class ReconciliationAndRestartTests
         Check.Equal(JobState.Unknown, _b.Local(id), "agent");
         Check.Equal("unknown", _b.Server(id), "ERP");
         Check.Equal("INTERRUPTED_SUBMISSION", _b.Erp.Job(id).AgentEvents.Last().ErrorCode, "reason reported");
-        Check.Equal(1, _b.Prints, "one submission attempt in total");
+        Check.Equal(1, _b.FakeSubmissions, "one submission attempt in total");
         Check.Equal(1, _b.Erp.Job(id).DeliveryAttempts, "ERP did not redeliver");
     }
 
-    [Test] public void ErpSaysResumeForAnUnknownJobAndTheAgentDoesNotPrint()
+    [Test] public void ErpSaysResumeForAnUnknownJobAndTheAgentDoesNotResubmit()
     {
         var id = _b.Enqueue();
         _b.R.Spooler.Then(new SpoolResult(SpoolOutcome.Indeterminate, ErrorCode: "WRITE_TIMEOUT"));
@@ -363,7 +412,7 @@ public sealed class ReconciliationAndRestartTests
 
         _b.Restart();
         for (var i = 0; i < 3; i++) _b.Cycle();
-        Check.Equal(1, _b.Prints, "no automatic reprint");
+        Check.Equal(1, _b.FakeSubmissions, "no automatic resubmission");
         Check.Equal(JobState.Unknown, _b.Local(id), "agent");
         Check.Equal("unknown", _b.Server(id), "ERP learns it is unknown");
     }
@@ -373,7 +422,7 @@ public sealed class ReconciliationAndRestartTests
         var id = AcceptedAndConfirmedButNotSubmitted();
         _b.Restart();
         _b.Cycle();
-        Check.Equal(1, _b.Prints, "printed once");
+        Check.Equal(1, _b.FakeSubmissions, "submitted to fake spooler once");
         Check.Equal("submitted_to_spooler", _b.Server(id), "state");
         _b.OutboxEmpty();
     }
@@ -392,7 +441,7 @@ public sealed class ReconciliationAndRestartTests
         Check.Sequence([original, reprint], _b.R.Spooler.Submissions.Select(s => s.JobId), "each id submitted once");
     }
 
-    [Test] public void JobTheErpAlreadyMarkedUnknownIsReportedFailedNotPrinted()
+    [Test] public void JobTheErpAlreadyMarkedUnknownIsReportedFailedNotSubmitted()
     {
         var id = _b.Enqueue();
         _b.Erp.FailNext("accept", MockErp.Fault.RequestLost);
@@ -401,12 +450,12 @@ public sealed class ReconciliationAndRestartTests
 
         var report = _b.Cycle();
         Check.True(report.Has(SyncReport.Abandoned, id), "reported");
-        Check.Equal(0, _b.Prints, "not printed against the server's state");
+        Check.Equal(0, _b.FakeSubmissions, "not submitted against the server's state");
         Check.Equal(JobState.Failed, _b.Local(id), "agent knows it never submitted");
         Check.Equal("failed", _b.Server(id), "ERP's unknown is resolved by a truthful 'failed'");
     }
 
-    [Test] public void JobMissingOnTheErpIsAbandonedAfterRestart()
+    [Test] public void JobMissingOnTheErpIsNotSubmittedAndItsAcceptStaysOwed()
     {
         var id = _b.Enqueue();
         _b.Erp.FailNext("accept", MockErp.Fault.RequestLost);
@@ -414,11 +463,36 @@ public sealed class ReconciliationAndRestartTests
         _b.Erp.Remove(id);
         _b.Restart();
         var report = _b.Cycle();
-        Check.True(report.Has(SyncReport.Abandoned, id), "reported");
+        Check.True(report.Has(SyncReport.Abandoned, id) && report.Has(SyncReport.Blocked, id), "reported");
         Check.Equal(JobState.Failed, _b.Local(id), "stopped");
-        Check.Equal(0, _b.Prints, "not printed");
+        Check.Equal(0, _b.FakeSubmissions, "not submitted");
+        Check.Equal(1, _b.R.Ledger.PendingAccepts().Count, "404 did not acknowledge anything");
+        Check.Equal(1, _b.R.Ledger.PendingEvents().Count, "the failure report is kept");
+    }
+
+    [Test] public void CancelLearnedThroughReconcileIsReportedAsCancelledNotFailed()
+    {
+        var id = AcceptedAndConfirmedButNotSubmitted();
+        _b.Erp.UserCancel(id);
+        _b.Restart(); // reconcile answers "abandon"; /accept then says why
+        var report = _b.Cycle();
+        Check.True(report.Has(SyncReport.Cancelled, id), "reported as cancelled");
+        Check.Equal(JobState.Cancelled, _b.Local(id), "agent");
+        Check.Equal("cancelled", _b.Server(id), "ERP");
+        Check.Equal(0, _b.FakeSubmissions, "not submitted");
+    }
+
+    [Test] public void AbandonedJobIsHeldEvenWhenTheFollowUpCallFails()
+    {
+        var id = AcceptedAndConfirmedButNotSubmitted();
+        _b.Erp.UserCancel(id);
+        _b.Restart();
+        _b.Erp.FailNext("accept", MockErp.Fault.RequestLost);
         _b.Cycle();
-        _b.OutboxEmpty();
+        Check.Equal(0, _b.FakeSubmissions, "held: not submitted while the reason is unknown");
+        _b.Cycle();
+        Check.Equal(JobState.Cancelled, _b.Local(id), "resolved on the next cycle");
+        Check.Equal(0, _b.FakeSubmissions, "not submitted");
     }
 
     [Test] public void CancelRequestedBeforeSubmissionIsHonoured()
@@ -428,7 +502,7 @@ public sealed class ReconciliationAndRestartTests
         var report = _b.Cycle();
         Check.True(report.Has(SyncReport.Cancelled, id), "reported");
         Check.Equal("cancelled", _b.Server(id), "ERP");
-        Check.Equal(0, _b.Prints, "not printed");
+        Check.Equal(0, _b.FakeSubmissions, "not submitted");
     }
 
     [Test] public void CancelAfterSubmissionIsTooLate()
@@ -449,16 +523,16 @@ public sealed class ReconciliationAndRestartTests
         _b.R.Clock.Advance(TimeSpan.FromHours(1));
         var report = _b.Cycle();
         Check.True(report.Has(SyncReport.Abandoned, id), "reported");
-        Check.Equal(0, _b.Prints, "never printed");
+        Check.Equal(0, _b.FakeSubmissions, "never submitted");
 
         _b.Erp.Down = false;
         _b.Cycle();
-        Check.Equal("failed", _b.Server(id), "ERP is told it was not printed");
+        Check.Equal("failed", _b.Server(id), "ERP is told it was not submitted");
         Check.Equal("AUTHORIZATION_EXPIRED", _b.Erp.Job(id).AgentEvents.Last().ErrorCode, "with the reason");
         _b.OutboxEmpty();
     }
 
-    [Test] public void ManyJobsAcrossRepeatedRestartsPrintExactlyOnceEach()
+    [Test] public void ManyJobsAcrossFaultsAndRestartsReachTheFakeSpoolerOnceEach()
     {
         var ids = Enumerable.Range(1, 8).Select(n => _b.Enqueue(n)).ToList();
         var faults = new[] { "claim", "accept", "events", "payload", "reconcile" };
@@ -530,5 +604,110 @@ public sealed class WireFormatTests
         ];
         foreach (var b in bad) Check.True(!AgentCredential.TryParse(b, out _), "must reject: " + b.Length + " chars");
         Check.True(!AgentCredential.TryParse(null, out _), "null");
+    }
+}
+
+public sealed class SafetyRecoveryTests
+{
+    private readonly Bench _b = new();
+
+    [Test] public void LostSpoolerOutcomeBecomesUnknownInTheRunningProcess()
+    {
+        var id = _b.Enqueue();
+        var failing = _b.R.Journal.Appends + 4; // accepted, accept_acked, submitting, then the spooler's answer
+        _b.R.Journal.AppendFault = n => n == failing ? (0, new IOException("disk full")) : null;
+        Check.Throws<JournalWriteException>(() => _b.Cycle(), "outcome could not be recorded");
+        Check.Equal(1, _b.FakeSubmissions, "fake spooler was called");
+        Check.Equal(JobState.Submitting, _b.Local(id), "outcome unknown to the journal");
+
+        var report = _b.Cycle(); // same process, storage works again
+        Check.True(report.Has(SyncReport.Interrupted, id), "reported");
+        Check.Equal(JobState.Unknown, _b.Local(id), "resolved conservatively without a restart");
+        Check.Equal("unknown", _b.Server(id), "ERP is told");
+        Check.Equal(1, _b.FakeSubmissions, "no blind retry");
+    }
+
+    [Test] public void ErpAheadOfJournalQuarantinesAndStopsAllSubmissions()
+    {
+        var a = _b.Enqueue(1);
+        _b.Cycle();
+        var beforeSubmit = _b.R.Journal.CrashImage();
+        var b = _b.Enqueue(2);
+        _b.Erp.FailNext("accept", MockErp.Fault.RequestLost);
+        _b.Cycle(); // job 2 accepted locally, waiting for confirmation
+        _b.R.Ledger.ConfirmCompleted(a, new Evidence(Evidence.SpoolerReportedComplete, null));
+        _b.Cycle();
+        Check.Equal(3, _b.Erp.Job(a).LastSeq, "fixture: ERP has three events for job 1");
+
+        // An older copy of the journal is put back: it knows job 1 only up to seq 2 and nothing of job 2's confirmation.
+        var old = _b.R.Journal.CrashImage();
+        _b.R.Ledger.ConfirmCompleted(b, new Evidence(Evidence.SpoolerReportedComplete, null)); // job 2 completes in "reality"
+        _b.Cycle();
+        _b.Restart(Truncate(old, dropRecords: 4));
+        var before = _b.FakeSubmissions;
+        var report = _b.Cycle();
+        Check.True(report.Has(SyncReport.Quarantined), "rollback evidence reported");
+        Check.True(_b.R.Ledger.QuarantineReason is not null, "quarantined");
+        var c = _b.Enqueue(3);
+        for (var i = 0; i < 3; i++) _b.Cycle();
+        Check.Equal(before, _b.FakeSubmissions, "nothing is submitted while quarantined");
+        Check.True(_b.R.Ledger.Find(c) is null, "nothing new is claimed either");
+
+        _b.Restart();
+        Check.True(_b.R.Ledger.QuarantineReason is not null, "quarantine survives restart");
+        _ = beforeSubmit;
+    }
+
+    [Test] public void ClearingQuarantineFailsDoubtfulJobsInsteadOfSubmittingThem()
+    {
+        var id = _b.Enqueue();
+        _b.Erp.FailNext("accept", MockErp.Fault.RequestLost);
+        _b.Cycle();
+        _b.Erp.Job(id).State = "submitted_to_spooler"; // the ERP recorded a submission this journal has no trace of
+        var report = _b.Cycle();
+        Check.True(report.Has(SyncReport.Quarantined, id), "reported");
+        Check.Equal(JobState.Accepted, _b.Local(id), "untouched while quarantined");
+        Check.Throws<LedgerQuarantinedException>(() => _b.R.Ledger.Submit(id, _b.R.Spooler), "direct submission refused too");
+
+        Check.Sequence([id], _b.R.Ledger.ClearQuarantine(), "operator action lists the jobs it gave up");
+        Check.Equal(JobState.Failed, _b.Local(id), "not submitted after recovery");
+        _b.Cycle();
+        Check.Equal(0, _b.FakeSubmissions, "never reached the fake spooler");
+    }
+
+    [Test] public void ReconcileRunsPeriodicallyNotOnEveryCycle()
+    {
+        _b.Enqueue();
+        _b.Cycle();
+        var calls = _b.Erp.CallCount("reconcile");
+        _b.Cycle();
+        _b.Cycle();
+        Check.Equal(calls, _b.Erp.CallCount("reconcile"), "not every cycle");
+        _b.R.Clock.Advance(TimeSpan.FromMinutes(10));
+        _b.Cycle();
+        Check.Equal(calls + 1, _b.Erp.CallCount("reconcile"), "after the interval");
+    }
+
+    [Test] public void JournalIsBoundToItsErpOrigin()
+    {
+        var journal = new MemoryJournalStore();
+        JobLedger.Open(journal, new MemoryBlobStore(), Rig.Agent, "https://erp.test", _b.R.Clock, _b.R.Ids.Next, out _).Dispose();
+        using var same = JobLedger.Open(new MemoryJournalStore(journal.CrashImage()), new MemoryBlobStore(), Rig.Agent, "https://erp.test", _b.R.Clock, _b.R.Ids.Next, out _);
+        Check.Equal("https://erp.test", same.Origin, "recorded");
+        Check.Throws<JournalMismatchException>(
+            () => JobLedger.Open(new MemoryJournalStore(journal.CrashImage()), new MemoryBlobStore(), Rig.Agent, "https://other.test", _b.R.Clock, _b.R.Ids.Next, out _),
+            "another origin must not reuse the journal");
+    }
+
+    /// <summary>Cuts whole records off the end of a journal image (what restoring an old copy looks like).</summary>
+    private static byte[] Truncate(byte[] image, int dropRecords)
+    {
+        var ends = new List<int>();
+        for (var o = 0; o < image.Length;)
+        {
+            o += Journal.JournalCodec.HeaderSize + (int)BitConverter.ToUInt32(image, o + 4) + Journal.JournalCodec.HashSize;
+            ends.Add(o);
+        }
+        return image[..ends[^(dropRecords + 1)]];
     }
 }

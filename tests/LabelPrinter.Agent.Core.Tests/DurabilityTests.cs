@@ -143,7 +143,7 @@ public sealed class RecoveryTests
         Check.Sequence([id], _r.Report.Resumable, "offered for continuation");
         Check.True(_r.Blobs.Blobs.ContainsKey(id), "payload kept");
         Check.Equal(JobState.SubmittedToSpooler, _r.Ledger.Submit(id, _r.Spooler).State, "continues");
-        Check.Equal(1, _r.Spooler.Submissions.Count, "printed once");
+        Check.Equal(1, _r.Spooler.Submissions.Count, "submitted to fake spooler once");
     }
 
     [Test] public void RestartPreservesEveryState()
@@ -172,7 +172,7 @@ public sealed class RecoveryTests
         Check.Sequence([ids[0]], _r.Blobs.Blobs.Keys, "payload kept only where still needed");
 
         foreach (var id in ids) _r.Ledger.Submit(id, _r.Spooler);
-        Check.Equal(5, _r.Spooler.Submissions.Count, "4 before restart + the resumed job; nothing printed twice");
+        Check.Equal(5, _r.Spooler.Submissions.Count, "4 before restart + the resumed job; nothing submitted twice");
     }
 
     [Test] public void PayloadWithoutAcceptanceRecordIsRemoved()

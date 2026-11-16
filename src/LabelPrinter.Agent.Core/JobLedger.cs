@@ -47,6 +47,10 @@ public sealed class LedgerFaultedException() : InvalidOperationException("Ledger
 
 public sealed class JournalMismatchException(string message) : IOException(message);
 
+/// <summary>Submission is suspended because the journal may be older than reality. See docs/durability.md.</summary>
+public sealed class LedgerQuarantinedException(string reason)
+    : InvalidOperationException("Ledger is quarantined (" + reason + "); an operator must clear it.");
+
 /// <summary>
 /// The portable agent core: one append-only journal is the single source of truth for acceptance, identity and
 /// content hash, state, and the outbox of acknowledgements still owed to the ERP. Every change is written and
@@ -64,6 +68,7 @@ public sealed class JobLedger : IDisposable
         public int Attempt;
         public bool AcceptAcked;
         public int LastSeq;
+        public OutboxBlock? Block;
         public readonly List<StatusEvent> Pending = [];
     }
 
@@ -75,6 +80,8 @@ public sealed class JobLedger : IDisposable
     private readonly Dictionary<Guid, Job> _jobs = [];
     private readonly List<Guid> _order = [];
     private Guid _agentId;
+    private string? _origin;
+    private string? _quarantine;
     private long _goodLength;
     private long _nextN;
     private byte[] _prevHash;
@@ -89,12 +96,23 @@ public sealed class JobLedger : IDisposable
 
     public Guid AgentId => _agentId;
 
+    /// <summary>ERP origin recorded when the journal was created (null for journals created without one).</summary>
+    public string? Origin => _origin;
+
+    /// <summary>Non-null while submission is suspended; the value is the reason code.</summary>
+    public string? QuarantineReason { get { lock (_gate) return _quarantine; } }
+
     /// <summary>
     /// Opens (or creates) the journal for one paired agent and performs crash recovery:
     /// an incomplete final record is truncated; any other damage throws <see cref="JournalCorruptException"/>;
     /// every job found in Submitting becomes Unknown; Accepted jobs stay resumable.
     /// </summary>
     public static JobLedger Open(IJournalStore journal, IBlobStore blobs, Guid agentId, TimeProvider clock, Func<Guid> newId, out RecoveryReport report)
+        => Open(journal, blobs, agentId, null, clock, newId, out report);
+
+    /// <summary>As above, additionally binding the journal to one ERP origin. A journal created for another
+    /// origin (or another agent) is refused rather than reused.</summary>
+    public static JobLedger Open(IJournalStore journal, IBlobStore blobs, Guid agentId, string? origin, TimeProvider clock, Func<Guid> newId, out RecoveryReport report)
     {
         if (agentId == Guid.Empty) throw new ArgumentException("agent id required", nameof(agentId));
         var decoded = JournalCodec.Decode(journal.ReadAll());
@@ -107,13 +125,15 @@ public sealed class JobLedger : IDisposable
         var ledger = new JobLedger(journal, blobs, clock, newId, decoded);
         if (decoded.Entries.Count == 0)
         {
-            ledger.Commit(new JournalEntry { T = JournalEntry.Header, AgentId = agentId });
+            ledger.Commit(new JournalEntry { T = JournalEntry.Header, AgentId = agentId, Origin = origin });
         }
         else
         {
             foreach (var entry in decoded.Entries) ledger.Apply(entry);
             if (ledger._agentId != agentId)
                 throw new JournalMismatchException("Journal belongs to a different agent identity; refusing to reuse it.");
+            if (origin is not null && !string.Equals(ledger._origin, origin, StringComparison.Ordinal))
+                throw new JournalMismatchException("Journal belongs to a different ERP origin; refusing to reuse it.");
         }
 
         var interrupted = ledger._jobs.Values.Where(j => j.State == JobState.Submitting).ToList();
@@ -197,6 +217,7 @@ public sealed class JobLedger : IDisposable
             EnsureUsable();
             var job = Require(jobId);
             if (job.State != JobState.Accepted) return new SubmitResult(SubmitOutcome.NotSubmittable, job.State);
+            if (_quarantine is not null) throw new LedgerQuarantinedException(_quarantine);
 
             var env = job.Envelope;
             if (_clock.GetUtcNow() > env.AgentMustNotSubmitAfter)
@@ -240,6 +261,79 @@ public sealed class JobLedger : IDisposable
                 TryDeleteBlob(jobId); // never needed again: this job is not resubmitted under any outcome
             }
             return new SubmitResult(SubmitOutcome.SpoolerInvoked, job.State);
+        }
+    }
+
+    /// <summary>
+    /// Records a delivered job that was refused before acceptance (invalid envelope, payload that never matched)
+    /// as Failed, with one "failed" event to report. Only for an envelope whose job id and agent id are usable;
+    /// returns false otherwise or when the job is already known. Nothing is ever submitted for such a job.
+    /// </summary>
+    public bool RecordRejected(JobEnvelope envelope, string reasonCode)
+    {
+        if (envelope.JobId == Guid.Empty || envelope.AgentId != _agentId || envelope.DeliveryAttempt < 1) return false;
+        lock (_gate)
+        {
+            EnsureUsable();
+            if (_jobs.ContainsKey(envelope.JobId)) return false;
+            Commit(new JournalEntry
+            {
+                T = JournalEntry.Rejected, Job = envelope, ContentHash = ContentHash.Compute(envelope),
+                EventId = _newId(), ErrorCode = Clip(reasonCode, 40),
+            });
+            return true;
+        }
+    }
+
+    /// <summary>Durably notes that the ERP refused this job's outbox (e.g. 404). Nothing is dropped.</summary>
+    public void BlockOutbox(Guid jobId, string code)
+    {
+        lock (_gate)
+        {
+            EnsureUsable();
+            Require(jobId);
+            Commit(new JournalEntry { T = JournalEntry.OutboxBlocked, JobId = jobId, ErrorCode = Clip(code, 40) });
+        }
+    }
+
+    /// <summary>
+    /// Turns jobs left in Submitting into Unknown. Submission is synchronous, so a job seen in Submitting
+    /// outside <see cref="Submit"/> lost its outcome record (storage failure after the spooler call).
+    /// </summary>
+    public IReadOnlyList<Guid> MarkInterruptedSubmissions(string reasonCode = "OUTCOME_NOT_RECORDED")
+    {
+        lock (_gate)
+        {
+            EnsureUsable();
+            var stuck = _jobs.Values.Where(j => j.State == JobState.Submitting).ToList();
+            foreach (var job in stuck) Transition(job, JobState.Unknown, errorCode: reasonCode);
+            return [.. stuck.Select(j => j.Envelope.JobId)];
+        }
+    }
+
+    /// <summary>Suspends all submissions until <see cref="ClearQuarantine"/>. Idempotent.</summary>
+    public void Quarantine(string reasonCode)
+    {
+        lock (_gate)
+        {
+            EnsureUsable();
+            if (_quarantine is not null) return;
+            Commit(new JournalEntry { T = JournalEntry.Quarantine, ErrorCode = Clip(reasonCode, 40) });
+        }
+    }
+
+    /// <summary>Explicit operator action. Every still-Accepted job is failed first: after a suspected rollback
+    /// the journal cannot prove they were never submitted, so they are not submitted.</summary>
+    public IReadOnlyList<Guid> ClearQuarantine()
+    {
+        lock (_gate)
+        {
+            EnsureUsable();
+            if (_quarantine is null) return [];
+            var doubtful = _jobs.Values.Where(j => j.State == JobState.Accepted).ToList();
+            foreach (var job in doubtful) FailBeforeSubmission(job, "QUARANTINE_RECOVERY");
+            Commit(new JournalEntry { T = JournalEntry.QuarantineCleared });
+            return [.. doubtful.Select(j => j.Envelope.JobId)];
         }
     }
 
@@ -414,9 +508,24 @@ public sealed class JobLedger : IDisposable
         {
             if (e.N != 0 || e.AgentId is not { } agent || agent == Guid.Empty) throw Bad(e, "misplaced or incomplete header");
             _agentId = agent;
+            _origin = e.Origin;
             return;
         }
         if (e.N == 0) throw Bad(e, "journal does not start with a header");
+
+        if (e.T == JournalEntry.Quarantine) { _quarantine = e.ErrorCode ?? "UNSPECIFIED"; return; }
+        if (e.T == JournalEntry.QuarantineCleared) { _quarantine = null; return; }
+
+        if (e.T == JournalEntry.Rejected)
+        {
+            if (e.Job is null || e.ContentHash is null || e.EventId is not { } rejectedEvent || _jobs.ContainsKey(e.Job.JobId)) throw Bad(e, "invalid rejection");
+            if (e.Job.AgentId != _agentId) throw Bad(e, "job of another agent");
+            var rejected = new Job { Envelope = e.Job, ContentHash = e.ContentHash, Attempt = e.Job.DeliveryAttempt, State = JobState.Failed, AcceptAcked = true, LastSeq = 1 };
+            rejected.Pending.Add(new StatusEvent(rejectedEvent, e.Job.JobId, 1, rejected.Attempt, JobState.Failed, e.At, e.ErrorCode, null, null, null));
+            _jobs.Add(e.Job.JobId, rejected);
+            _order.Add(e.Job.JobId);
+            return;
+        }
 
         if (e.T == JournalEntry.Accepted)
         {
@@ -436,10 +545,15 @@ public sealed class JobLedger : IDisposable
                 break;
             case JournalEntry.AcceptAcked:
                 job.AcceptAcked = true;
+                job.Block = null;
+                break;
+            case JournalEntry.OutboxBlocked:
+                job.Block = new OutboxBlock(e.ErrorCode ?? "UNSPECIFIED", (job.Block?.Count ?? 0) + 1, e.At);
                 break;
             case JournalEntry.EventsAcked:
                 if (e.Seq is not { } upTo || upTo > job.LastSeq) throw Bad(e, "acknowledges a missing event");
                 job.Pending.RemoveAll(p => p.Seq <= upTo);
+                job.Block = null;
                 break;
             case JournalEntry.Transition:
                 if (e.From != job.State || e.To is not { } to || e.Seq != job.LastSeq + 1 || e.EventId is not { } eventId)
@@ -472,7 +586,7 @@ public sealed class JobLedger : IDisposable
     }
 
     private JobSnapshot Snapshot(Job j) =>
-        new(new JobKey(_agentId, j.Envelope.JobId), j.State, j.ContentHash, j.Attempt, j.AcceptAcked, j.LastSeq, j.Envelope);
+        new(new JobKey(_agentId, j.Envelope.JobId), j.State, j.ContentHash, j.Attempt, j.AcceptAcked, j.LastSeq, j.Envelope, j.Block);
 
     private static bool IsStorageError(Exception ex) => ex is IOException or UnauthorizedAccessException;
 

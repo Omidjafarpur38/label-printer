@@ -71,7 +71,9 @@ public sealed class MockErp(TimeProvider clock) : IErpClient
         return j.State is "submitting" or "submitted_to_spooler" ? "too_late" : "not_cancellable";
     }
 
-    public void Remove(Guid id) { _jobs.Remove(id); _order.Remove(id); }
+    /// <summary>Makes the ERP answer 404 for this job (wrong database, deleted row). Returns it for <see cref="Restore"/>.</summary>
+    public ServerJob Remove(Guid id) { var j = _jobs[id]; _jobs.Remove(id); _order.Remove(id); return j; }
+    public void Restore(ServerJob job) { _jobs.Add(job.Envelope.JobId, job); _order.Add(job.Envelope.JobId); }
 
     public MockErp FailNext(string op, Fault fault)
     {

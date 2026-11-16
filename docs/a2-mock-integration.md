@@ -25,22 +25,41 @@ local submission of already confirmed jobs still runs. Storage failures propagat
 
 1. `/accept` is sent only for jobs whose acceptance record is already flushed.
 2. A job is submitted only after the ERP answered `/accept` with state `accepted_by_agent`. Until then it
-   waits; when `agentMustNotSubmitAfter` passes it becomes Failed (`AUTHORIZATION_EXPIRED`) without printing.
-3. If `/accept` shows any other server state (the ERP answers `duplicate` with e.g. `unknown` after giving up
-   on delivery), a never-submitted job is abandoned and reported `failed` — the one case where the ERP's
-   `unknown → failed` is truthful, because the agent knows nothing was sent.
+   waits; when `agentMustNotSubmitAfter` passes it becomes Failed (`AUTHORIZATION_EXPIRED`) without being
+   submitted.
+3. If `/accept` shows a server state the agent can explain (`unknown` after the server gave up on delivery), a
+   never-submitted job is abandoned and reported `failed`. If it shows a *submitted* state for a job the
+   journal holds as never submitted, the ledger is quarantined (rule 10).
 4. Payload: envelope validated before download; `X-Payload-Sha256` and the envelope hash must both match the
-   bytes; one refetch, then the job is left unaccepted (no local record, no ack).
-5. Same job id with different immutable content: reported, the local job is abandoned, nothing is printed.
-6. Events go in `seq` order, ≤ 20 per call, only after the accept is settled. `applied`, `duplicate` and
-   `stale` all count as delivered; only events covered by the answer are acknowledged. 409/422 blocks that
-   job's stream until the next reconcile and is reported; 404 clears the outbox for that job (journal keeps
-   the history).
-7. Reconcile is advisory: `report_events` trims the outbox up to `fromSeq - 1`; `abandon` stops a
-   never-submitted job; `resume` grants nothing.
-8. `cancelJobIds` / `cancelRequested` cancel only jobs still Accepted.
-9. Unknown is never resubmitted: `ErpSync` only calls `Submit` for Accepted jobs and the ledger refuses
-   anything else. A reprint is a different job id.
+   bytes; one refetch, then the job is refused.
+5. A refused job (invalid envelope, payload that never matched) is written to the journal as Failed and
+   reported to the ERP with one `failed` event (`delivered → failed` is permitted by the ERP). An envelope
+   without a usable identity (empty job id, another agent's id) is only noted locally; nothing is invented.
+6. Same job id with different immutable content: reported, the local job is abandoned, nothing is submitted.
+7. Events go in `seq` order, ≤ 20 per call, only after the accept is settled. `applied`, `duplicate` and
+   `stale` all count as delivered; only events covered by the answer are acknowledged.
+8. A 404/409/422 or an incomplete answer **blocks** that job's outbox: a journal record (`outbox_blocked`)
+   keeps code, count and time. Nothing is dropped and a 404 never counts as an acknowledgement. Delivery is
+   retried after 1 min × 2^(blocks−1), capped at 1 h, across restarts; a real acknowledgement clears the block.
+9. Reconcile (at start, after `LEASE_LOST`, and every 10 min) is advisory: `report_events` trims the outbox up
+   to `fromSeq − 1`; `resume` grants nothing; `abandon` puts a never-submitted job on hold until `/accept`
+   says why — cancel requested → **Cancelled**; lease lost / expired → **Failed**; 404 → Failed and blocked.
+10. Quarantine: when the ERP has events or a submission the journal does not know (`fromSeq − 1 > lastSeq`,
+    or a submitted state for a locally Accepted job), the journal is presumed older than reality. A durable
+    `quarantine` record stops all submissions and claims. Clearing it is an explicit operator action that
+    first fails every still-Accepted job. Not every rollback is detectable this way (see durability.md).
+11. A job left in Submitting because the spooler's answer could not be recorded becomes Unknown on the next
+    cycle of the same process (or at restart); it is never resubmitted.
+12. `cancelJobIds` / `cancelRequested` cancel only jobs still Accepted.
+13. Unknown is never resubmitted: `ErpSync` only calls `Submit` for Accepted jobs and the ledger refuses
+    anything else. A reprint is a different job id.
+
+### Failed versus Cancelled
+
+- **Failed**: it is known that nothing was handed to a spooler (expired, refused, abandoned, spooler rejected
+  with nothing written).
+- **Cancelled**: the ERP explicitly asked for cancellation while the job was still Accepted.
+- Neither is used for a job that may have reached a spooler; that is Unknown.
 
 ## Verified against ERP code (commit 83a936a3, agent-facing files identical to 0f48373f)
 
@@ -52,15 +71,10 @@ local submission of already confirmed jobs still runs. Storage failures propagat
 
 ## Limitations
 
-- The mock is a transcription by reading; it can be wrong where the reading was wrong, and it has no HTTP,
-  JSON, auth, rate limits, RLS or database semantics. Nothing here was run against a real ERP.
-- Rule 2 trades availability for control: while the ERP is unreachable after a claim, accepted jobs do not
-  print. This is an agent-side choice and can be revisited.
-- A locally invalid envelope or persistently corrupt payload is only reported locally; the ERP is not told and
-  will mark the job `unknown` on expiry (no durable way to report a job the agent never accepted).
-- An `abandon` caused by a user cancel request is reported as `failed` (`ERP_ABANDON`), not `cancelled`: the
-  directive does not say why.
-- Blocked event streams are retried only after a reconcile, which currently happens on restart or LEASE_LOST.
-- Cancel requests arrive only with claim/accept answers (no heartbeat yet).
-- 429 handling, backoff and jitter are absent. Journal compaction is still absent.
-- Single-threaded cycle; no long-poll.
+- The mock is a transcription by reading; it can be wrong where the reading was wrong. See
+  `docs/integration-testing.md` for what was run against the real ERP code.
+- Rule 2 trades availability for control: while the ERP is unreachable after a claim, accepted jobs are not
+  submitted.
+- "Submitted once" in tests means one call to the fake spooler. It is not a statement about paper.
+- Blocked outboxes are retried forever at most once per hour per job; there is no retention/compaction yet.
+- Single-threaded cycle.

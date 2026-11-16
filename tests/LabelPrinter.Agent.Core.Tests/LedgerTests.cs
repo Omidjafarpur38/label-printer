@@ -190,7 +190,7 @@ public sealed class SubmissionTests
         var a = _r.AcceptNew(1);
         var b = _r.AcceptNew(2);
         Check.True(_r.Ledger.Cancel(a), "accepted job cancels");
-        Check.Equal(SubmitOutcome.NotSubmittable, _r.Ledger.Submit(a, _r.Spooler).Outcome, "cancelled job is not printed");
+        Check.Equal(SubmitOutcome.NotSubmittable, _r.Ledger.Submit(a, _r.Spooler).Outcome, "cancelled job is not submitted");
         _r.Ledger.Submit(b, _r.Spooler);
         Check.True(!_r.Ledger.Cancel(b), "too late after submission");
         Check.Equal(JobState.SubmittedToSpooler, _r.Ledger.Find(b)!.State, "state unchanged");
@@ -203,7 +203,7 @@ public sealed class SubmissionTests
         _r.Ledger.Submit(id, _r.Spooler);
         Check.Throws<InvalidTransitionException>(() => _r.Ledger.ConfirmCompleted(id, new Evidence("looks_fine", null)), "unrecognised evidence");
         Check.Equal(JobState.SubmittedToSpooler, _r.Ledger.Find(id)!.State, "rejected confirmation changes nothing");
-        _r.Ledger.ConfirmCompleted(id, new Evidence(Evidence.SpoolerReportedComplete, "job 12 printed"));
+        _r.Ledger.ConfirmCompleted(id, new Evidence(Evidence.SpoolerReportedComplete, "spooler reports job 12 done"));
         var last = _r.Ledger.PendingEvents().Last();
         Check.Equal(JobState.ConfirmedCompleted, last.State, "state");
         Check.Equal(Evidence.SpoolerReportedComplete, last.Evidence!.Level, "evidence travels with the event");
