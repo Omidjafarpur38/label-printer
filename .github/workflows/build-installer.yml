@@ -39,7 +39,7 @@ jobs:
           # The lock files cover package references (there are none). The runtime pack needed for a
           # self-contained build is a Microsoft SDK download and is restored here without the lock.
           foreach ($p in 'LabelPrinter.Agent', 'LabelPrinter.Agent.Background') {
-            dotnet publish "src/$p" -c Release -r win-x64 --self-contained true -p:Version=${{ inputs.version }} -p:RestorePackagesWithLockFile=false -o publish
+            dotnet publish "src/$p" -c Release -r win-x64 --self-contained true "-p:Version=${{ inputs.version }}" "-p:RestorePackagesWithLockFile=false" -o publish
             if ($LASTEXITCODE -ne 0) { exit 1 }
           }
           & publish/LabelPrinterAgent.exe version
@@ -58,7 +58,7 @@ jobs:
         shell: pwsh
         run: |
           foreach ($p in 'LabelPrinter.Agent', 'LabelPrinter.Agent.Background') {
-            dotnet publish "src/$p" -c Release -r win-x64 --self-contained true -p:Version=99.0.0-upgradetest -p:RestorePackagesWithLockFile=false -o publish-next
+            dotnet publish "src/$p" -c Release -r win-x64 --self-contained true "-p:Version=99.0.0-upgradetest" "-p:RestorePackagesWithLockFile=false" -o publish-next
             if ($LASTEXITCODE -ne 0) { exit 1 }
           }
           New-Item -ItemType Directory -Force out-next | Out-Null
