@@ -12,6 +12,9 @@ public sealed class TestAttribute : Attribute
 
 public sealed class CheckFailedException(string message) : Exception(message);
 
+/// <summary>Thrown by a test that cannot run here (e.g. no test ERP configured). Reported as skipped, never as passed.</summary>
+public sealed class SkipException(string reason) : Exception(reason);
+
 public static class Check
 {
     public static void True(bool condition, string what)
@@ -78,6 +81,12 @@ public static class Program
                 instance = null;
                 passed++;
                 Console.WriteLine($"PASS  {name}");
+            }
+            catch (TargetInvocationException ex) when (ex.InnerException is SkipException skip)
+            {
+                skipped++;
+                Console.WriteLine($"SKIP  {name} ({skip.Message})");
+                try { (instance as IDisposable)?.Dispose(); } catch (Exception) { /* nothing ran */ }
             }
             catch (Exception ex)
             {

@@ -53,6 +53,10 @@ public sealed record ErpSyncOptions
 /// </summary>
 public sealed class ErpSync(JobLedger ledger, IErpClient erp, ISpooler spooler, TimeProvider clock, ErpSyncOptions? options = null)
 {
+    /// <summary>Optional local admission check (e.g. "is this the configured printer, language and DPI?").
+    /// Returns a reason code to refuse a structurally valid job before its payload is downloaded.</summary>
+    public Func<JobEnvelope, string?>? Admit { get; init; }
+
     private static readonly string AcceptedWire = JobStateMachine.WireName(JobState.Accepted);
     private static readonly HashSet<string> ServerSubmittedStates = ["submitting", "submitted_to_spooler", "confirmed_completed"];
     private readonly ErpSyncOptions _options = options ?? new ErpSyncOptions();
@@ -267,6 +271,7 @@ public sealed class ErpSync(JobLedger ledger, IErpClient erp, ISpooler spooler, 
 
             var errors = EnvelopeValidator.ValidateEnvelope(envelope, ledger.AgentId);
             if (errors.Count > 0) { Reject(report, envelope, "ENVELOPE_INVALID", Describe(errors)); continue; }
+            if (Admit?.Invoke(envelope) is { } refusal) { Reject(report, envelope, refusal, null); continue; }
 
             byte[]? payload;
             try { payload = FetchVerified(envelope); }
