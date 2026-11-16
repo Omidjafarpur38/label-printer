@@ -89,7 +89,7 @@ Approval request (exact set, all checked against the official NuGet registration
 - Actions are pinned by commit id; the tags were resolved with `git ls-remote` on 2026-11-16 and were the
   highest released versions then.
 - The runtime pack is not covered by `packages.lock.json` (it is an SDK download, not a package reference),
-  so the publish step restores without the lock; the test and build steps keep `--locked-mode`.
+  so it is not listed there; restore, build, test and publish all run in locked mode.
 - Self-contained was chosen over framework-dependent so that the user installs nothing else and the runtime
   version is the one that was tested. Cost: about 78 MB on disk.
 - Still no xUnit: tests use the in-repo runner by decision.

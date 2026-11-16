@@ -10,5 +10,7 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <!-- Reproducible restore: every project commits packages.lock.json (see docs/tooling.md). -->
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- Declared so that the lock files also cover the win-x64 publish and stay unchanged by it. -->
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
   </PropertyGroup>
 </Project>
