@@ -410,5 +410,6 @@ public sealed class FileBackedTests : IDisposable
         bytes[^40] ^= 0xFF;
         File.WriteAllBytes(JournalPath, bytes);
         Check.Throws<JournalCorruptException>(() => Open(out _), "open");
+        using (new FileStream(JournalPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { } // refused journal is not left locked
     }
 }

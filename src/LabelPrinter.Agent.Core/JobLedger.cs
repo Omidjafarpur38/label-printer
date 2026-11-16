@@ -114,6 +114,14 @@ public sealed class JobLedger : IDisposable
     /// origin (or another agent) is refused rather than reused.</summary>
     public static JobLedger Open(IJournalStore journal, IBlobStore blobs, Guid agentId, string? origin, TimeProvider clock, Func<Guid> newId, out RecoveryReport report)
     {
+        // The ledger owns the journal handle from here on, also when opening fails: a refused journal must not
+        // stay locked (on Windows the open handle would block inspection, repair and deletion).
+        try { return OpenCore(journal, blobs, agentId, origin, clock, newId, out report); }
+        catch { journal.Dispose(); throw; }
+    }
+
+    private static JobLedger OpenCore(IJournalStore journal, IBlobStore blobs, Guid agentId, string? origin, TimeProvider clock, Func<Guid> newId, out RecoveryReport report)
+    {
         if (agentId == Guid.Empty) throw new ArgumentException("agent id required", nameof(agentId));
         var decoded = JournalCodec.Decode(journal.ReadAll());
         if (decoded.TornBytes > 0)
