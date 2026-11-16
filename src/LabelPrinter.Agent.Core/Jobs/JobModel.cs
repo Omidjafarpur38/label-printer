@@ -131,6 +131,10 @@ public sealed record StatusEvent(
 /// <summary>A durable acceptance the ERP has not yet acknowledged (POST /jobs/{id}/accept).</summary>
 public sealed record PendingAccept(Guid JobId, int Attempt);
 
+/// <summary>Delivery to the ERP for this job is stopped after an answer that is neither success nor retryable.
+/// <see cref="Count"/> consecutive blocks drive the retry backoff; any acknowledged delivery clears it.</summary>
+public sealed record OutboxBlock(string Code, int Count, DateTimeOffset At);
+
 public sealed record JobSnapshot(
     JobKey Key,
     JobState State,
@@ -138,4 +142,5 @@ public sealed record JobSnapshot(
     int DeliveryAttempt,
     bool AcceptAcknowledged,
     int LastSeq,
-    JobEnvelope Envelope);
+    JobEnvelope Envelope,
+    OutboxBlock? Block = null);

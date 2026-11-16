@@ -1,6 +1,8 @@
 # A2 proposal — ERP client against a local/mock ERP
 
-Status: proposal only. Nothing here is implemented or approved.
+Status: partly approved. Implemented subset and its limits: `a2-mock-integration.md`. Everything else in this
+document (HTTPS client, identity storage, polling/backoff, rotation, configuration, Kestrel mock) remains a
+proposal and is not approved.
 
 Goal: drive `JobLedger` from the ERP's agent API, proven end to end against a local mock, with no production
 host, no real credential and no printer (the fake spooler stays).

@@ -1,7 +1,8 @@
 # label-printer
 
-Windows print agent for the jeans-production-erp label workflow. **Status: milestone A1** — the
-platform-independent core only. There is no networking, no Windows printing, no installer and no release.
+Windows print agent for the jeans-production-erp label workflow. **Status: A1 + the approved subset of A2** —
+the platform-independent core and its ERP synchronisation logic, tested against a mock. There is no
+networking, no Windows printing, no installer and no release.
 
 | Area | State |
 |---|---|
@@ -9,7 +10,8 @@ platform-independent core only. There is no networking, no Windows printing, no 
 | Durable file-backed journal, idempotent acceptance, outbox | implemented, synthetic tests |
 | Spooler abstraction + deterministic fake | implemented |
 | Contract models | read from ERP source, never exercised over HTTP — not production-ready |
-| HTTP client, pairing, credentials, DPAPI, service, printer discovery, TSPL/ZPL handling, CI | not started (A2+) |
+| ERP synchronisation (claim, accept, events, reconcile) | implemented against an in-memory mock only |
+| HTTP/TLS client, pairing, credential storage, DPAPI, service, printer discovery, TSPL/ZPL handling, CI | not started |
 
 ## Build and test
 
@@ -36,4 +38,5 @@ by name, e.g. `-- Journal`.
 - `docs/durability.md` — journal format, guarantees, and what is *not* guaranteed
 - `docs/erp-baseline.md` — what was verified in the ERP source and where it disagrees with its own contract draft
 - `docs/tooling.md` — SDK provenance, lockfiles, pending test-package approval
-- `docs/a2-proposal.md` — proposed next milestone (mock ERP client integration)
+- `docs/a2-mock-integration.md` — what the mock ERP integration does and does not cover
+- `docs/a2-proposal.md` — original A2 proposal (only part of it was approved)

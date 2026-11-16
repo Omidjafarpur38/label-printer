@@ -1,8 +1,11 @@
 # ERP baseline and contract discrepancies
 
-Baseline: `Omidjafarpur38/jeans-production-erp` at commit `0f48373fa70d8ab234e362def62913bac95ec6cf`
-(2026-11-15). Read-only inspection of source; the ERP was not run and not modified. No separate server
-verification report was available in this session.
+Baseline: `Omidjafarpur38/jeans-production-erp`. A1 inspected commit
+`0f48373fa70d8ab234e362def62913bac95ec6cf`; A2 re-checked at `83a936a3573b89dda95990d04576e8d3b38cd266`
+(2026-11-15). Between the two, only `backend/src/label-print/output.ts` (lazy encoder loading) and documents
+changed; the agent service, print service, controller, routes, error handler and migration are identical.
+Read-only inspection of source; the ERP was not run and not modified. No separate server verification report
+was available.
 
 Files read: `backend/src/label-print/{agent.service,print.service,errors,output,flag}.ts`,
 `backend/src/controllers/label-agent.controller.ts`, `backend/src/routes/label-agent.routes.ts`,
@@ -18,7 +21,7 @@ Everything below is "verified against source", which is weaker than "observed on
 - Parser: `^Bearer lpa1_([A-Za-z0-9_-]{16,48})\.([A-Za-z0-9_-]{32,64})$` on the `Authorization` header.
 - Lifetime 90 days; rotation creates a `pending_rotation` credential (24 h) that is committed on first use and
   revokes its predecessor; re-pairing revokes all earlier credentials of that agent.
-- A1 contains no credential code and no credential value. The prefix is recorded here only as a format fact.
+- The repository contains no credential value. `AgentCredential` (A2) only recognises the shape and redacts the secret; nothing stores or sends one.
 
 ## 2. HTTP error structure — discrepancy, isolated
 
@@ -106,8 +109,8 @@ with `reprintOf`.
 ## Unresolved (does not block A1)
 
 1. 429 body shape and whether `Retry-After` is present.
-2. Whether `error_code` is present for every label-agent error in practice (depends on `error-catalog.ts`
-   staying in sync with `errors.ts`).
+2. `error_code`: the label-agent codes used by the agent routes are registered in `error-catalog.ts` at the
+   baseline, so the handler emits them; this stays true only while the catalog and `errors.ts` stay in sync.
 3. Exact JSON types on the wire (e.g. numeric `profileVersion`, ISO timestamps with `Z`) — expected from
    source, to be pinned by fixture tests in A2 using `docs/label-agent/fixtures` from the ERP repo.
 4. Payload retrieval headers (`X-Payload-Sha256`, `ETag`) are emitted per source; not yet consumed.

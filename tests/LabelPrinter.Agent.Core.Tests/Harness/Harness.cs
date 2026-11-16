@@ -74,6 +74,8 @@ public static class Program
             {
                 instance = Activator.CreateInstance(method.DeclaringType!);
                 method.Invoke(instance, null);
+                (instance as IDisposable)?.Dispose(); // cleanup failures (e.g. a leaked file handle) fail the test
+                instance = null;
                 passed++;
                 Console.WriteLine($"PASS  {name}");
             }
@@ -82,10 +84,7 @@ public static class Program
                 failed++;
                 var cause = ex is TargetInvocationException { InnerException: { } inner } ? inner : ex;
                 Console.WriteLine($"FAIL  {name}\n      {cause.GetType().Name}: {cause.Message}\n{cause.StackTrace}");
-            }
-            finally
-            {
-                (instance as IDisposable)?.Dispose();
+                try { (instance as IDisposable)?.Dispose(); } catch (Exception) { /* already failed */ }
             }
         }
 

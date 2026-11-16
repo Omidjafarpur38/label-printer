@@ -89,7 +89,7 @@ or an error, and (c) only this process writes the directory:
 
 - **Lying storage.** Consumer SSDs, USB bridges and some virtual disks acknowledge flushes they have not
   performed; a volatile write cache without power-loss protection can lose flushed records. If a flushed
-  Submitting record is lost this way, the job reappears as Accepted and could be printed twice. No software
+  Submitting record is lost this way, the job reappears as Accepted and could be submitted twice. No software
   layer above the device can close this gap.
 - **Loss of whole trailing records.** If the file is cut exactly at a record boundary (lost writes as above,
   or restoring an old copy), the result is a valid shorter journal and cannot be detected locally. Restoring a
@@ -115,6 +115,6 @@ open. Before production use it needs compaction:
   file; flush; atomically replace the old file; keep the single-writer handle semantics;
 - a job is droppable only when it is terminal, its outbox is empty, **and** its authorization window has
   passed (the ERP can redeliver until `authorizationExpiresAt`, currently 1 h, at most 24 h by agent bound) —
-  earlier removal would let a redelivered job be accepted and printed again;
+  earlier removal would let a redelivered job be accepted and submitted again;
 - Unknown jobs are retained until resolved by an operator;
 - a size or age threshold triggers it; sealed old journals are retained for a configurable audit period.

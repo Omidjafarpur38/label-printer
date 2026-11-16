@@ -21,8 +21,9 @@ public sealed class ContractModelAttribute(ContractStatus status, string note = 
 
 public static class ContractInfo
 {
-    /// <summary>ERP commit whose source was inspected for A1 (jeans-production-erp).</summary>
-    public const string ErpBaselineCommit = "0f48373fa70d8ab234e362def62913bac95ec6cf";
+    /// <summary>ERP commit whose source was inspected (jeans-production-erp). A1 used 0f48373f; the agent-facing
+    /// files are byte-identical at this later commit.</summary>
+    public const string ErpBaselineCommit = "83a936a3573b89dda95990d04576e8d3b38cd266";
 
     /// <summary>Exact string the ERP negotiates and stamps on envelopes (SERVER_CONTRACTS = ['0.1']).
     /// The ERP documentation calls the same contract "0.1.0-draft"; the wire value is "0.1".</summary>
@@ -124,12 +125,3 @@ public enum ReconcileAction
     /// <summary>ERP: "report_events" with fromSeq.</summary>
     ReportEvents,
 }
-
-/// <summary>
-/// Error body actually produced by the ERP global error handler (app.ts). It is flat, unlike the nested
-/// { error: { code, retryable } } shape in the ERP contract document. <c>error</c> carries the JS error name
-/// (usually "Error"), so the stable code is <c>error_code</c>. Two agent routes bypass the handler and omit
-/// error_code (events jobId mismatch; rate-limit responses were not verified). Draft until exercised over HTTP.
-/// </summary>
-[ContractModel(ContractStatus.Draft, "app.ts setErrorHandler; shape read from source, not observed on the wire")]
-public sealed record ErpErrorBody(string? Error, string? Message, string? ErrorCode, string? TraceId, string? UserFriendlyMessageFa);

@@ -20,7 +20,8 @@ public sealed class JournalEntry
     public const int FormatVersion = 1;
 
     public const string Header = "header", Accepted = "accepted", Redelivered = "redelivered",
-        Transition = "transition", AcceptAcked = "accept_acked", EventsAcked = "events_acked";
+        Transition = "transition", AcceptAcked = "accept_acked", EventsAcked = "events_acked",
+        Rejected = "rejected", OutboxBlocked = "outbox_blocked", Quarantine = "quarantine", QuarantineCleared = "quarantine_cleared";
 
     public int V { get; set; } = FormatVersion;
     public long N { get; set; }
@@ -30,7 +31,8 @@ public sealed class JournalEntry
     public Guid? AgentId { get; set; }        // header
     public JobEnvelope? Job { get; set; }     // accepted
     public string? ContentHash { get; set; }  // accepted
-    public Guid? JobId { get; set; }          // all job-scoped records except accepted
+    public Guid? JobId { get; set; }          // all job-scoped records except accepted/rejected
+    public string? Origin { get; set; }       // header: ERP origin this journal is bound to
     public int? Attempt { get; set; }         // redelivered
     public JobState? From { get; set; }       // transition
     public JobState? To { get; set; }
