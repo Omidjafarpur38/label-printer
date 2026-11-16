@@ -108,7 +108,9 @@ with `reprintOf`.
 
 ## Unresolved (does not block A1)
 
-1. 429 body shape and whether `Retry-After` is present.
+1. ~~429 body shape~~ — observed against the real backend on 2026-11-16: status 429,
+   `error_code: "SYSTEM_INTERNAL_ERROR"` (generic fallback branch), `Retry-After: 60`. The agent uses the
+   status and the header only. Recommended ERP correction: a specific code for rate limiting.
 2. `error_code`: the label-agent codes used by the agent routes are registered in `error-catalog.ts` at the
    baseline, so the handler emits them; this stays true only while the catalog and `errors.ts` stay in sync.
 3. Exact JSON types on the wire (e.g. numeric `profileVersion`, ISO timestamps with `Z`) — expected from

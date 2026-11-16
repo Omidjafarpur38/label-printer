@@ -14,8 +14,86 @@ src/LabelPrinter.Agent.Core            net10.0, no packages, no OS-specific code
 tests/LabelPrinter.Agent.Core.Tests    in-repo runner, fake spooler, fault-injecting stores
 ```
 
-There is deliberately no plugin system, DI container or async pipeline. A2 adds an HTTP client that drives
-`JobLedger`; a later milestone adds a Windows `ISpooler`.
+```
+src/LabelPrinter.Agent.Core (continued)
+  Erp/IErpClient.cs, ErpSync.cs        sync cycle (docs/a2-mock-integration.md)
+  Erp/HttpErpClient.cs                 HTTPS transport for /api/label-agent/v1
+  Runtime/IdentityStore.cs             pairing facts + protected credential, pending rotation
+  Runtime/AgentRunner.cs               the loop: heartbeat, rotation, backoff, stop conditions
+src/LabelPrinter.Agent                 console front end (LabelPrinterAgent.exe) + host
+  Windows/Native.cs                    DPAPI, file ACL, HKCU autostart
+  Windows/RawSpooler.cs                winspool RAW document, queue listing, job status
+src/LabelPrinter.Agent.Background      same sources built windowless (LabelPrinterAgentBg.exe): loop only
+installer/LabelPrinterAgent.iss        per-user Inno Setup installer
+```
+
+There is deliberately no plugin system, DI container or async pipeline.
+
+## Transport
+
+- Origin must be `https://host[:port]`; plain http is accepted for loopback only (local test ERP). No path,
+  query or credentials in the origin. Certificate validation is the platform default and cannot be disabled.
+- Redirects are not followed and cookies are not used, so the credential cannot leave the origin.
+- The credential exists in memory and in the DPAPI-protected file only; it is sent in `Authorization` and
+  appears in no URL, argument, log line or exception message.
+- Every request has a timeout; answers are size-bounded (JSON 1 MiB, payload 8 MiB).
+- The transport never retries. 4xx becomes `ErpException` (status + `error_code`); 5xx, 3xx, timeouts, dropped
+  connections and unusable answers become `ErpUnavailableException`, which means "the ERP may or may not have
+  processed this". Retrying is the sync cycle's job and is safe there because: accept is idempotent on the
+  server, events are deduplicated by `eventId`/`seq`, reconcile is a read with an idempotent implicit ack,
+  a lost claim answer is repaired by redelivery of the same job, printer report is a replace. **Pairing is
+  not retried**: a pairing code is consumed by the first attempt.
+- An envelope with a missing or mistyped field makes the whole answer unusable; no identity is guessed.
+  Unknown fields are ignored.
+- Heartbeat is sent every `heartbeatSec` (from pairing, clamped 10–300 s) and carries cancel requests back.
+  There is no lease-renewal endpoint in the ERP and none is invented: `/accept` extends the lease to the
+  job's authorization expiry on the server.
+
+## Runner
+
+One iteration: heartbeat if due → rotate credential if older than 60 days → one sync cycle → choose a delay.
+
+| Outcome | Next step |
+|---|---|
+| work done | 0.2 s |
+| idle | 1 s (the claim itself long-polls up to 15 s) |
+| ERP paused (feature flag off for the tenant) | 30 s |
+| no usable answer | exponential backoff with full jitter, 2 s base, 5 min cap, never under 0.5 s |
+| 429 | `Retry-After`, bounded to 5 s – 15 min |
+| 403 | 5 min |
+| 401 | stop (`CredentialRejected`); if a rotated credential was pending, drop it and fall back once |
+| 426 | stop (`ContractUnsupported`) |
+| storage failure | stop the process; the next start recovers from disk |
+
+Rotation: `POST /credential/rotate` → store as pending → present it on the next call → the first success
+promotes it (the ERP commits a rotated credential on first use and revokes the previous one then).
+
+## Windows host
+
+- **Execution model:** an ordinary process of the logged-in user. No Windows Service: a service would need
+  administrator installation, would run as another identity (other DPAPI scope, other printer visibility)
+  and is not needed to test. Consequence: the agent runs only while that user is logged in.
+- **Autostart** is an HKCU `Run` value pointing at the windowless build, written only by
+  `autostart enable`. The installer writes none.
+- **Stopping:** a named event per data directory; `stop --wait N` signals it and waits for the journal lock
+  to be released. The current ERP call (≤ 15 s long-poll) finishes first.
+- **Single owner:** the journal file lock. A second instance exits with code 6.
+- **Start conditions:** paired, a printer selected explicitly, and that queue exists. Otherwise the process
+  exits without contacting the ERP for jobs. The default printer is never looked up.
+- **Admission:** a job is refused before download unless its ERP printer id, language and DPI equal the
+  operator's selection; the refusal is journaled and reported as `failed`.
+- **RAW spooler:** `OpenPrinter` → `StartDocPrinter("RAW")` → `StartPagePrinter` → `WritePrinter` in 64 KiB
+  chunks, continuing short writes → `EndPagePrinter` → `EndDocPrinter`. Failure before any byte was written
+  (and a successful abort) is "rejected, nothing written"; any failure after the first write is
+  indeterminate → Unknown. Handles are closed on every path.
+- **Completion evidence:** only if the spooler flags the job PRINTED/COMPLETE while the agent is watching.
+  A job that just leaves the queue stays `submitted_to_spooler`. A job seen as deleted becomes Unknown.
+  Watching is in-memory and ends with the process.
+- **Credential:** DPAPI, CurrentUser scope, fixed application entropy, ACL restricted to the user, SYSTEM
+  and Administrators before content is written. This does not protect against software running as the
+  same user, or against an administrator.
+- **Changing ERP:** the journal records its origin and agent id. `pair` refuses another origin while a
+  pairing exists; the ledger refuses a journal of another origin or agent.
 
 ## Job identity
 
