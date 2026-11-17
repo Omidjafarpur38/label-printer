@@ -72,7 +72,6 @@ Check ((Agent @('version')).Trim() -eq '99.0.0-upgradetest') 'upgraded program r
 $after = Get-ChildItem $data -Recurse -File | ForEach-Object { "$($_.Name) $((Get-FileHash $_.FullName).Hash)" } | Sort-Object
 Check (($before -join '|') -eq ($after -join '|')) 'data folder is byte-identical after the upgrade'
 Check ((Get-ItemProperty $runKey).LabelPrinterAgent -like '*LabelPrinterAgentBg.exe*') 'autostart choice survives the upgrade'
-Remove-Item $marker
 
 Write-Host "`n== uninstall (silent) keeps data, removes program and autostart"
 $uninstaller = Get-ChildItem $app -Filter 'unins*.exe' | Select-Object -First 1
@@ -80,6 +79,7 @@ Run-Setup $uninstaller.FullName @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTAR
 Start-Sleep -Seconds 3
 Check (-not (Test-Path $exe)) 'program removed'
 Check ($null -eq (Get-ItemProperty $runKey -ErrorAction SilentlyContinue).LabelPrinterAgent) 'autostart entry removed'
-Check (Test-Path (Join-Path $data 'settings.json')) 'data folder kept by a silent uninstall'
+$kept = Get-ChildItem $data -Recurse -File | ForEach-Object { "$($_.Name) $((Get-FileHash $_.FullName).Hash)" } | Sort-Object
+Check (($before -join '|') -eq ($kept -join '|')) 'data folder is byte-identical after a silent uninstall'
 Remove-Item $data -Recurse -Force
 Write-Host "`ninstaller smoke test passed"

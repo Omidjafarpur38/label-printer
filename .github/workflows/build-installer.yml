@@ -64,6 +64,9 @@ jobs:
           New-Item -ItemType Directory -Force out-next | Out-Null
           & "${{ steps.inno.outputs.iscc }}" "/DAppVersion=99.0.0-upgradetest" "/DPublishDir=$PWD\publish-next" "/DOutputDir=$PWD\out-next" installer\LabelPrinterAgent.iss
           if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Create a file-backed test print queue (no physical printer)
+        shell: pwsh
+        run: ./tools/windows/New-TestPrintQueue.ps1
       - name: Install, upgrade and uninstall smoke test
         shell: pwsh
         run: ./tools/windows/Test-Installer.ps1 -Installer (Get-ChildItem out\*.exe).FullName -NextInstaller (Get-ChildItem out-next\*.exe).FullName -Version '${{ inputs.version }}'
