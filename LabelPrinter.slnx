@@ -1,6 +1,8 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/LabelPrinter.Agent.Core/LabelPrinter.Agent.Core.csproj" />
+    <Project Path="src/LabelPrinter.Agent/LabelPrinter.Agent.csproj" />
+    <Project Path="src/LabelPrinter.Agent.Background/LabelPrinter.Agent.Background.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/LabelPrinter.Agent.Core.Tests/LabelPrinter.Agent.Core.Tests.csproj" />

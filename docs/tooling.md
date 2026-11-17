@@ -74,3 +74,22 @@ Approval request (exact set, all checked against the official NuGet registration
   migrate the tests (mechanical: `[Test]` → `[Fact]`, `Check.*` → `Assert.*`).
 - Alternative needing fewer packages: run xunit.v3 on Microsoft.Testing.Platform only and drop the two VSTest
   packages. Not evaluated in practice.
+
+## Build and release tooling (added with the Windows installer)
+
+| Tool | Version / pin | Source | License | Use |
+|---|---|---|---|---|
+| `actions/checkout` | v7.0.1 `3d3c42e5` | github.com/actions (GitHub) | MIT | CI |
+| `actions/setup-dotnet` | v6.1.0 `0f4a354d` | github.com/actions (GitHub) | MIT | CI: installs Microsoft's .NET 10 SDK on runners |
+| `actions/upload-artifact` / `download-artifact` | v7.0.2 `cf430e03` / v8.0.2 `9000827c` | github.com/actions (GitHub) | MIT | pass the installer between jobs |
+| Inno Setup | the copy on the GitHub Windows image, else winget `JRSoftware.InnoSetup`; version is printed in the build log | jrsoftware.org | Inno Setup License (free, commercial use allowed) | builds the installer |
+| .NET runtime pack `Microsoft.NETCore.App.Runtime.win-x64` | resolved by the SDK at publish time | nuget.org, Microsoft | MIT | self-contained deployment |
+| GitHub CLI `gh` | preinstalled on runners | GitHub | MIT | creates the prerelease |
+
+- Actions are pinned by commit id; the tags were resolved with `git ls-remote` on 2026-11-16 and were the
+  highest released versions then.
+- The runtime pack is not covered by `packages.lock.json` (it is an SDK download, not a package reference),
+  so it is not listed there; restore, build, test and publish all run in locked mode.
+- Self-contained was chosen over framework-dependent so that the user installs nothing else and the runtime
+  version is the one that was tested. Cost: about 78 MB on disk.
+- Still no xUnit: tests use the in-repo runner by decision.

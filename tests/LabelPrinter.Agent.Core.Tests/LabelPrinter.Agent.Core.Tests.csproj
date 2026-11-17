@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\LabelPrinter.Agent.Core\LabelPrinter.Agent.Core.csproj" />
+    <ProjectReference Include="..\..\src\LabelPrinter.Agent\LabelPrinter.Agent.csproj" />
   </ItemGroup>
 </Project>

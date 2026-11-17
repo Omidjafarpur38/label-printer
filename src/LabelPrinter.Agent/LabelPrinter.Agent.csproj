@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Console front end: every interactive command, and `run` in the foreground. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>LabelPrinterAgent</AssemblyName>
+    <RootNamespace>LabelPrinter.Agent</RootNamespace>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="LabelPrinter.Agent.Core.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\LabelPrinter.Agent.Core\LabelPrinter.Agent.Core.csproj" />
+  </ItemGroup>
+</Project>

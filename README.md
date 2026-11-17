@@ -1,21 +1,20 @@
 # label-printer
 
-Windows print agent for the jeans-production-erp label workflow. **Status: A1 + the approved subset of A2** —
-the platform-independent core and its ERP synchronisation logic, tested against a mock. There is no
-networking, no Windows printing, no installer and no release.
+Windows print agent for the jeans-production-erp label workflow. **Status: experimental.** An unsigned
+test build exists; it has not been used with a physical printer or a production ERP.
 
 | Area | State |
 |---|---|
-| Job identity, content hash, state machine | implemented, synthetic tests |
-| Durable file-backed journal, idempotent acceptance, outbox | implemented, synthetic tests |
-| Spooler abstraction + deterministic fake | implemented |
-| Contract models | read from ERP source, never exercised over HTTP — not production-ready |
-| ERP synchronisation (claim, accept, events, reconcile) | implemented against an in-memory mock only |
-| HTTP/TLS client, pairing, credential storage, DPAPI, service, printer discovery, TSPL/ZPL handling, CI | not started |
+| Core: job identity, state machine, durable journal, outbox | implemented; automated tests |
+| ERP synchronisation and HTTPS transport | implemented; tested against a mock and, manually, against the real ERP backend on loopback |
+| Windows RAW spooler, DPAPI credential store | implemented; tested on a Windows CI runner with a file-backed print queue |
+| Installer (per-user, unsigned) | implemented; install/upgrade/uninstall tested on a Windows CI runner |
+| Physical printing | **not tested** |
+| Code signing, auto-update, Windows Service, command validation, journal compaction | not implemented |
 
 ## Build and test
 
-Requires the .NET 10 SDK (see `docs/tooling.md`). No NuGet packages are used.
+Requires the .NET 10 SDK (see `docs/tooling.md`). No NuGet packages are referenced.
 
 ```bash
 dotnet restore LabelPrinter.slnx --locked-mode
@@ -34,9 +33,11 @@ by name, e.g. `-- Journal`.
 
 ## Documents
 
-- `docs/architecture.md` — components, state machine, idempotency, payload and copy safety
-- `docs/durability.md` — journal format, guarantees, and what is *not* guaranteed
-- `docs/erp-baseline.md` — what was verified in the ERP source and where it disagrees with its own contract draft
-- `docs/tooling.md` — SDK provenance, lockfiles, pending test-package approval
-- `docs/a2-mock-integration.md` — what the mock ERP integration does and does not cover
-- `docs/a2-proposal.md` — original A2 proposal (only part of it was approved)
+- `docs/setup-guide.md` — install, configure, pair, run, diagnose, remove
+- `docs/recovery.md` — quarantine, corrupt or restored journals, unknown jobs
+- `docs/integration-testing.md` — what was tested against what, and what was not
+- `docs/architecture.md`, `docs/durability.md` — design and its limits
+- `docs/a2-mock-integration.md` — synchronisation rules
+- `docs/erp-baseline.md` — ERP contract as read from source, and discrepancies
+- `docs/tooling.md` — SDK, CI actions, installer tooling
+- `docs/releases/` — release notes

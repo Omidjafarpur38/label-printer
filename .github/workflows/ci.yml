@@ -19,7 +19,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
@@ -28,5 +28,15 @@ jobs:
       - run: dotnet --info
       - run: dotnet restore LabelPrinter.slnx --locked-mode
       - run: dotnet build LabelPrinter.slnx --no-restore -c Release
+      - name: Create a file-backed test print queue (Windows only; no physical printer)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tools/windows/New-TestPrintQueue.ps1
       - name: Tests (in-repo runner; non-zero exit on any failure)
         run: dotnet run --project tests/LabelPrinter.Agent.Core.Tests -c Release --no-build
+
+  installer:
+    needs: test
+    uses: ./.github/workflows/build-installer.yml
+    with:
+      version: 0.0.0-ci.${{ github.run_number }}

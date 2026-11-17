@@ -1,0 +1,109 @@
+name: release
+
+# Publishes an UNSIGNED EXPERIMENTAL prerelease for a pushed tag v<version>.
+# The installer is built and install/upgrade/uninstall-tested by build-installer.yml from the tagged commit;
+# the bytes that were tested and hashed there are the bytes attached to the release.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - id: v
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          case "$v" in *-*) ;; *) echo "Only prerelease versions (with a '-suffix') are published by this workflow."; exit 1;; esac
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet restore LabelPrinter.slnx --locked-mode
+      - run: dotnet build LabelPrinter.slnx --no-restore -c Release
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tools/windows/New-TestPrintQueue.ps1
+      - run: dotnet run --project tests/LabelPrinter.Agent.Core.Tests -c Release --no-build
+
+  installer:
+    needs: [version, test]
+    uses: ./.github/workflows/build-installer.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+
+  publish:
+    needs: [version, installer]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: installer
+          path: dist
+      - name: Re-verify the downloaded bytes against the hash computed on the build machine
+        run: |
+          cd dist
+          ls -l
+          actual="$(sha256sum "${{ needs.installer.outputs.installer-name }}" | cut -d' ' -f1)"
+          size="$(stat -c %s "${{ needs.installer.outputs.installer-name }}")"
+          test "$actual" = "${{ needs.installer.outputs.sha256 }}" || { echo "hash mismatch"; exit 1; }
+          test "$size" = "${{ needs.installer.outputs.size }}" || { echo "size mismatch"; exit 1; }
+      - name: Write manifest and notes
+        run: |
+          v="${{ needs.version.outputs.version }}"
+          notes="docs/releases/$v.md"
+          test -f "$notes" || { echo "missing $notes"; exit 1; }
+          cat > dist/release-manifest.json <<JSON
+          {
+            "version": "$v",
+            "channel": "experimental",
+            "signed": false,
+            "platform": "windows-x64",
+            "file": "${{ needs.installer.outputs.installer-name }}",
+            "sizeBytes": ${{ needs.installer.outputs.size }},
+            "sha256": "${{ needs.installer.outputs.sha256 }}",
+            "commit": "${{ github.sha }}",
+            "tag": "${{ github.ref_name }}"
+          }
+          JSON
+          {
+            cat "$notes"
+            echo
+            echo "## Artifact"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| File | \`${{ needs.installer.outputs.installer-name }}\` |"
+            echo "| Size | ${{ needs.installer.outputs.size }} bytes |"
+            echo "| SHA-256 | \`${{ needs.installer.outputs.sha256 }}\` |"
+            echo "| Commit | \`${{ github.sha }}\` |"
+            echo "| Signature | **none** (unsigned) |"
+          } > notes.md
+      - name: Create the prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            "dist/${{ needs.installer.outputs.installer-name }}" dist/SHA256SUMS.txt dist/release-manifest.json \
+            --repo "${{ github.repository }}" --verify-tag --prerelease \
+            --title "Label Printer Agent ${{ needs.version.outputs.version }} (experimental, unsigned)" \
+            --notes-file notes.md
