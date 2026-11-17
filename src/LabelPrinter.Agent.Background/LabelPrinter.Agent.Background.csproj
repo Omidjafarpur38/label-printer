@@ -7,11 +7,13 @@
     <RootNamespace>LabelPrinter.Agent</RootNamespace>
     <DefineConstants>$(DefineConstants);BACKGROUND</DefineConstants>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <ApplicationIcon>..\LabelPrinter.Agent\app.ico</ApplicationIcon>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\LabelPrinter.Agent\**\*.cs" Exclude="..\LabelPrinter.Agent\bin\**;..\LabelPrinter.Agent\obj\**" LinkBase="Shared" />
+    <EmbeddedResource Include="..\LabelPrinter.Agent\Ui\*" LogicalName="ui/%(Filename)%(Extension)" />
     <ProjectReference Include="..\LabelPrinter.Agent.Core\LabelPrinter.Agent.Core.csproj" />
   </ItemGroup>
 </Project>

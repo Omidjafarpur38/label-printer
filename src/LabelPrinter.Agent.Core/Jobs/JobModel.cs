@@ -143,4 +143,7 @@ public sealed record JobSnapshot(
     bool AcceptAcknowledged,
     int LastSeq,
     JobEnvelope Envelope,
-    OutboxBlock? Block = null);
+    OutboxBlock? Block = null,
+    DateTimeOffset UpdatedAt = default,
+    string? LastErrorCode = null,
+    string? SpoolerJobRef = null);

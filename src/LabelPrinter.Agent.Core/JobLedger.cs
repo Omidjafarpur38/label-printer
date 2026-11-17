@@ -69,6 +69,9 @@ public sealed class JobLedger : IDisposable
         public bool AcceptAcked;
         public int LastSeq;
         public OutboxBlock? Block;
+        public DateTimeOffset UpdatedAt;
+        public string? LastErrorCode;
+        public string? SpoolerRef;
         public readonly List<StatusEvent> Pending = [];
     }
 
@@ -528,7 +531,7 @@ public sealed class JobLedger : IDisposable
         {
             if (e.Job is null || e.ContentHash is null || e.EventId is not { } rejectedEvent || _jobs.ContainsKey(e.Job.JobId)) throw Bad(e, "invalid rejection");
             if (e.Job.AgentId != _agentId) throw Bad(e, "job of another agent");
-            var rejected = new Job { Envelope = e.Job, ContentHash = e.ContentHash, Attempt = e.Job.DeliveryAttempt, State = JobState.Failed, AcceptAcked = true, LastSeq = 1 };
+            var rejected = new Job { Envelope = e.Job, ContentHash = e.ContentHash, Attempt = e.Job.DeliveryAttempt, State = JobState.Failed, AcceptAcked = true, LastSeq = 1, UpdatedAt = e.At, LastErrorCode = e.ErrorCode };
             rejected.Pending.Add(new StatusEvent(rejectedEvent, e.Job.JobId, 1, rejected.Attempt, JobState.Failed, e.At, e.ErrorCode, null, null, null));
             _jobs.Add(e.Job.JobId, rejected);
             _order.Add(e.Job.JobId);
@@ -539,7 +542,7 @@ public sealed class JobLedger : IDisposable
         {
             if (e.Job is null || e.ContentHash is null || _jobs.ContainsKey(e.Job.JobId)) throw Bad(e, "invalid acceptance");
             if (e.Job.AgentId != _agentId) throw Bad(e, "job of another agent");
-            _jobs.Add(e.Job.JobId, new Job { Envelope = e.Job, ContentHash = e.ContentHash, Attempt = e.Job.DeliveryAttempt });
+            _jobs.Add(e.Job.JobId, new Job { Envelope = e.Job, ContentHash = e.ContentHash, Attempt = e.Job.DeliveryAttempt, UpdatedAt = e.At });
             _order.Add(e.Job.JobId);
             return;
         }
@@ -570,6 +573,9 @@ public sealed class JobLedger : IDisposable
                 try { JobStateMachine.Ensure(job.State, to, evidence, e.SpoolerJobRef); }
                 catch (InvalidTransitionException ex) { throw Bad(e, ex.Message); }
                 job.State = to;
+                job.UpdatedAt = e.At;
+                job.LastErrorCode = e.ErrorCode;
+                if (e.SpoolerJobRef is not null) job.SpoolerRef = e.SpoolerJobRef;
                 job.LastSeq = e.Seq!.Value;
                 job.Pending.Add(new StatusEvent(eventId, id, job.LastSeq, job.Attempt, to, e.At, e.ErrorCode, e.ErrorMessage, e.SpoolerJobRef, evidence));
                 break;
@@ -594,7 +600,7 @@ public sealed class JobLedger : IDisposable
     }
 
     private JobSnapshot Snapshot(Job j) =>
-        new(new JobKey(_agentId, j.Envelope.JobId), j.State, j.ContentHash, j.Attempt, j.AcceptAcked, j.LastSeq, j.Envelope, j.Block);
+        new(new JobKey(_agentId, j.Envelope.JobId), j.State, j.ContentHash, j.Attempt, j.AcceptAcked, j.LastSeq, j.Envelope, j.Block, j.UpdatedAt, j.LastErrorCode, j.SpoolerRef);
 
     private static bool IsStorageError(Exception ex) => ex is IOException or UnauthorizedAccessException;
 

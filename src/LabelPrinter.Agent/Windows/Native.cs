@@ -100,7 +100,7 @@ internal static class Autostart
     public static void Enable(string backgroundExe)
     {
         using var key = Registry.CurrentUser.CreateSubKey(RunKey);
-        key.SetValue(ValueName, "\"" + backgroundExe + "\"", RegistryValueKind.String);
+        key.SetValue(ValueName, "\"" + backgroundExe + "\" --background", RegistryValueKind.String);
     }
 
     public static void Disable()

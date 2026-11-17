@@ -34,6 +34,12 @@ UninstallDisplayName=Label Printer Agent {#AppVersion} (experimental)
 InfoBeforeFile=..\docs\installer-notice.txt
 CloseApplications=no
 SetupLogging=yes
+SetupIconFile=..\src\LabelPrinter.Agent\app.ico
+UninstallDisplayIcon={app}\LabelPrinterAgentBg.exe
+
+[Tasks]
+Name: "autostart"; Description: "Start Label Printer Agent automatically when Windows starts (no window; recommended)"
+Name: "desktopicon"; Description: "Create a desktop icon"
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -46,10 +52,21 @@ Source: "..\docs\installer-notice.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
+Name: "{autoprograms}\Label Printer Agent (experimental)\Label Printer Agent"; Filename: "{app}\LabelPrinterAgentBg.exe"; Comment: "Open the Label Printer Agent control window"
+Name: "{autodesktop}\Label Printer Agent"; Filename: "{app}\LabelPrinterAgentBg.exe"; Comment: "Open the Label Printer Agent control window"; Tasks: desktopicon
 Name: "{autoprograms}\Label Printer Agent (experimental)\Setup guide"; Filename: "{app}\setup-guide.md"
 Name: "{autoprograms}\Label Printer Agent (experimental)\Command prompt here"; Filename: "{cmd}"; Parameters: "/K ""cd /d ""{app}"" && LabelPrinterAgent.exe status"""; WorkingDir: "{app}"
 
-; Deliberately no [Run] and no [Registry] entries: installing does not start, pair, register autostart or print.
+[Registry]
+; Autostart is an explicit installer choice (checked by default). It is written only on a FRESH install, so an
+; upgrade never re-enables something the user switched off in the control window.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "LabelPrinterAgent"; ValueData: """{app}\LabelPrinterAgentBg.exe"" --background"; Flags: uninsdeletevalue; Tasks: autostart; Check: FreshInstall
+
+[Run]
+; Opens the control window after an interactive install. Silent installs never start anything.
+Filename: "{app}\LabelPrinterAgentBg.exe"; Description: "Open Label Printer Agent now"; Flags: postinstall nowait skipifsilent
+
+; Installing never pairs, selects a printer or prints. The program stays idle until the user does both.
 
 [UninstallDelete]
 ; Program files only. The data directory (%LOCALAPPDATA%\LabelPrinterAgent) is handled in code below.
@@ -59,6 +76,20 @@ const
   DataSubDir = 'LabelPrinterAgent';
   RunKey = 'Software\Microsoft\Windows\CurrentVersion\Run';
   RunValue = 'LabelPrinterAgent';
+
+var
+  WasInstalled: Boolean;
+
+function FreshInstall(): Boolean;
+begin
+  Result := not WasInstalled;
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  WasInstalled := FileExists(ExpandConstant('{localappdata}\Programs\LabelPrinterAgent\LabelPrinterAgent.exe'));
+  Result := True;
+end;
 
 function AgentExe(): String;
 begin
