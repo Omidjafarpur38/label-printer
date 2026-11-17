@@ -157,6 +157,8 @@ public sealed class ControlPanelSecurityTests : IDisposable
         var html = _b.Http.GetStringAsync("/").Result;
         Check.True(!html.Contains("<script>") && !html.Contains("onclick"), "no inline script");
         Check.True(html.Contains("dir=\"rtl\"") && html.Contains("عامل چاپ لیبل"), "Persian RTL page");
+        foreach (var id in new[] { "panel-connect", "panel-printer", "panel-control", "panel-guide" }) Check.True(html.Contains("id=\"" + id + "\""), "tab panel " + id);
+        Check.True(html.Contains("data-goto=\"guide\""), "connection form links to the guide");
     }
 
     [Test] public void PanelIsReachableOnLoopbackOnly()

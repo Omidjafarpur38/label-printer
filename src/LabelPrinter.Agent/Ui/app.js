@@ -17,6 +17,22 @@ const WORKER = {
 };
 let current = null;
 let formsFilled = false;
+let initialTabChosen = false;
+
+function showTab(name) {
+  for (const t of document.querySelectorAll('.tab')) {
+    const on = t.dataset.tab === name;
+    t.setAttribute('aria-selected', on ? 'true' : 'false'); t.tabIndex = on ? 0 : -1;
+    $('panel-' + t.dataset.tab).hidden = !on;
+  }
+}
+for (const t of document.querySelectorAll('.tab')) t.addEventListener('click', () => showTab(t.dataset.tab));
+document.querySelector('.tabs').addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  const tabs = [...document.querySelectorAll('.tab')], i = tabs.findIndex((t) => t.getAttribute('aria-selected') === 'true');
+  const n = tabs[(i + (e.key === 'ArrowLeft' ? 1 : -1) + tabs.length) % tabs.length]; showTab(n.dataset.tab); n.focus(); // RTL: left = next
+});
+for (const b of document.querySelectorAll('[data-goto]')) b.addEventListener('click', () => showTab(b.dataset.goto));
 
 async function api(path, body) {
   const opt = body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-LP': '1' }, body: JSON.stringify(body) };
@@ -35,7 +51,7 @@ const fmt = (iso) => { if (!iso) return ''; const d = new Date(iso); return isNa
 
 function render(s) {
   current = s;
-  $('version').textContent = 'نسخه ' + s.version + ' (آزمایشی، امضانشده)';
+  { const v = document.createElement('bdi'); v.dir = 'ltr'; v.textContent = s.version; $('version').replaceChildren('نسخه ', v, ' (آزمایشی، امضانشده)'); }
   const [label, kind] = WORKER[s.state] || [s.state, 'warn'];
   const pill = $('pill');
   pill.textContent = s.paused && s.state === 'Running' ? 'متوقف‌شده توسط شما' : label;
@@ -46,6 +62,8 @@ function render(s) {
   else if (!s.erpReachable) { banner = 'اتصال به سرور برقرار نیست؛ کارهای جدید نمی‌رسند. برنامه خودش دوباره تلاش می‌کند.'; bk = 'warn'; }
   showBanner(banner, bk);
 
+  $('tick-connect').hidden = !s.paired; $('tick-printer').hidden = !s.printer;
+  if (!initialTabChosen) { initialTabChosen = true; showTab(!s.paired ? 'connect' : !s.printer ? 'printer' : 'control'); }
   $('connect-done').hidden = !s.paired;
   $('connect-form').hidden = !!s.paired;
   if (s.paired) { $('origin').textContent = s.paired.origin; $('agent-name').textContent = s.paired.name; }
@@ -109,14 +127,15 @@ $('connect-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const btn = e.submitter; btn.disabled = true;
   const r = await act(api('/api/pair', { origin: $('in-origin').value, code: $('in-code').value, name: $('in-name').value }));
-  btn.disabled = false; if (r && r.ok) $('in-code').value = '';
+  btn.disabled = false; if (r && r.ok) { $('in-code').value = ''; showTab('printer'); }
 });
 $('btn-unpair').addEventListener('click', () => { if (confirm('اتصال این کامپیوتر به سرور قطع شود؟\nپرونده‌ی ثبت کارها نگه داشته می‌شود.')) act(api('/api/unpair', { confirm: true })); });
 $('printer-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (current && current.printer && current.printer.queue !== $('in-queue').value && !confirm('چاپگر عوض شود؟ کارهای در انتظار چاپگر قبلی ناموفق ثبت می‌شوند.')) return;
-  await act(api('/api/printer', { queue: $('in-queue').value, language: $('in-language').value, dpi: Number($('in-dpi').value), widthMm: Number($('in-width').value), heightMm: Number($('in-height').value) }));
+  const r = await act(api('/api/printer', { queue: $('in-queue').value, language: $('in-language').value, dpi: Number($('in-dpi').value), widthMm: Number($('in-width').value), heightMm: Number($('in-height').value) }));
   formsFilled = false;
+  if (r && r.ok) showTab('control');
 });
 $('btn-pause').addEventListener('click', () => act(api('/api/pause', { paused: !(current && current.paused) })));
 $('in-autostart').addEventListener('change', (e) => act(api('/api/autostart', { enabled: e.target.checked })));
@@ -133,5 +152,6 @@ async function refresh() {
   try { const r = await api('/api/state'); if (r.data && r.data.state) render(r.data); }
   catch (e) { if (e.message !== 'auth') showBanner('ارتباط با برنامه قطع شد. اگر برنامه را بسته‌اید، از آیکن دوباره باز کنید.', 'bad'); }
 }
+showTab("connect");
 refresh();
 setInterval(refresh, 2000);

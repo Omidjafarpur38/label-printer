@@ -18,8 +18,16 @@
   <section id="banner" class="banner" role="status" aria-live="polite" hidden></section>
   <section id="toast" class="toast" role="status" aria-live="polite" hidden></section>
 
+  <nav class="tabs" role="tablist" aria-label="بخش‌های برنامه">
+    <button class="tab" role="tab" id="tab-connect" data-tab="connect" aria-controls="panel-connect"><span class="num">۱</span> اتصال <span class="tick" id="tick-connect" hidden>✓</span></button>
+    <button class="tab" role="tab" id="tab-printer" data-tab="printer" aria-controls="panel-printer"><span class="num">۲</span> چاپگر <span class="tick" id="tick-printer" hidden>✓</span></button>
+    <button class="tab" role="tab" id="tab-control" data-tab="control" aria-controls="panel-control"><span class="num">۳</span> کنترل و کارها</button>
+    <button class="tab" role="tab" id="tab-guide" data-tab="guide" aria-controls="panel-guide">راهنما</button>
+  </nav>
+
+  <div class="panel" role="tabpanel" id="panel-connect" aria-labelledby="tab-connect">
   <section class="card" id="card-connect">
-    <h2><span class="num">۱</span> اتصال به سرور</h2>
+    <h2>اتصال به سرور</h2>
     <div id="connect-done" hidden>
       <p>وصل است به: <b id="origin" dir="ltr"></b></p>
       <p class="muted">نام این کامپیوتر در سرور: <span id="agent-name"></span></p>
@@ -27,14 +35,19 @@
     </div>
     <form id="connect-form" autocomplete="off">
       <label>آدرس سرور <input id="in-origin" dir="ltr" placeholder="https://erp.example.com" required></label>
-      <label>کد اتصال (از بخش چاپ لیبل در سامانه ساخته می‌شود) <input id="in-code" dir="ltr" autocomplete="off" required></label>
+      <p class="hint">همان آدرسی که ERP را با آن در مرورگر باز می‌کنید؛ فقط با https.</p>
+      <label>کد اتصال <input id="in-code" dir="ltr" autocomplete="off" placeholder="7K3M-9QX2" required></label>
+      <p class="hint">کد ۸ حرفی یک‌بار مصرف است و ۱۰ دقیقه اعتبار دارد؛ از سامانه ساخته می‌شود. <button type="button" class="link" data-goto="guide">کد را از کجا بگیرم؟</button></p>
       <label>نام این کامپیوتر <input id="in-name" placeholder="مثلاً صندوق ۱"></label>
       <button class="btn" type="submit">اتصال</button>
     </form>
+    <p class="muted small">نصب به‌تنهایی کاری نمی‌کند؛ تا وقتی اتصال انجام نشود چیزی دریافت یا چاپ نمی‌شود.</p>
   </section>
+  </div>
 
+  <div class="panel" role="tabpanel" id="panel-printer" aria-labelledby="tab-printer" hidden>
   <section class="card" id="card-printer">
-    <h2><span class="num">۲</span> چاپگر</h2>
+    <h2>چاپگر</h2>
     <p class="muted">برنامه فقط روی چاپگری که اینجا انتخاب می‌کنید چاپ می‌کند و هرگز از چاپگر پیش‌فرض ویندوز استفاده نمی‌کند.</p>
     <form id="printer-form">
       <label>چاپگر <select id="in-queue" required></select></label>
@@ -51,8 +64,11 @@
     </form>
   </section>
 
+  </div>
+
+  <div class="panel" role="tabpanel" id="panel-control" aria-labelledby="tab-control" hidden>
   <section class="card" id="card-control">
-    <h2><span class="num">۳</span> کنترل</h2>
+    <h2>کنترل</h2>
     <div class="row wrap">
       <button id="btn-pause" class="btn big">توقف ارسال</button>
       <label class="check"><input id="in-autostart" type="checkbox"> اجرا با روشن شدن ویندوز (بدون پنجره)</label>
@@ -80,6 +96,58 @@
     <summary>گزارش رویدادها</summary>
     <pre id="log" dir="ltr"></pre>
   </details>
+  </div>
+
+  <div class="panel" role="tabpanel" id="panel-guide" aria-labelledby="tab-guide" hidden>
+  <section class="card guide">
+    <h2>راهنمای اتصال، قدم‌به‌قدم</h2>
+    <p class="muted">این نسخه آزمایشی است و فقط برای سرور آزمایشی/دمو در نظر گرفته شده، نه کار روزمره.</p>
+
+    <h3>قبل از شروع</h3>
+    <ul>
+      <li>اینترنت کامپیوتر وصل باشد و بتواند سایت سامانه را باز کند.</li>
+      <li>چاپگر لیبل روی همین کامپیوتر نصب و در ویندوز دیده شود (Settings ← Printers).</li>
+      <li>مدیر سامانه قابلیت «چاپ لیبل نسخه ۲» را برای تولیدی شما روشن کرده باشد. بدون آن، سرور اتصال را نمی‌پذیرد.</li>
+    </ul>
+
+    <h3>قدم ۱ — گرفتن کد اتصال</h3>
+    <ul>
+      <li>کد اتصال را «سامانه» می‌سازد و باید مدیر تولیدی آن را بسازد. کد ۸ حرف و عدد است (مثل <bdi dir="ltr">7K3M-9QX2</bdi>)، فقط یک بار کار می‌کند و ۱۰ دقیقه اعتبار دارد. خط تیره و فاصله مهم نیست.</li>
+      <li class="note"><b>وضعیت فعلی:</b> در این نسخه‌ی آزمایشی هنوز دکمه‌ی «ساخت کد اتصال» در صفحه‌های سامانه ساخته نشده است؛ پس در بخش «طراحی لیبل و چاپ» آن را پیدا نمی‌کنید. فعلاً کد فقط با فراخوانی <bdi dir="ltr">POST /api/label-print/pairing-codes</bdi> (ورود مدیر به سرور آزمایشی) ساخته می‌شود. اگر مدیر فنی ندارید، منتظر نسخه‌ای بمانید که این دکمه را در سامانه دارد.</li>
+    </ul>
+
+    <h3>قدم ۲ — پر کردن تب «۱ اتصال»</h3>
+    <ol>
+      <li><b>آدرس سرور:</b> آدرس سایتی که ERP را با آن باز می‌کنید، با https و بدون چیز اضافه، مثلاً <bdi dir="ltr">https://demo.poshakerp.top</bdi>. آدرس اشتباه یا http پذیرفته نمی‌شود.</li>
+      <li><b>کد اتصال:</b> همان کد ۸ حرفی را بنویسید یا بچسبانید.</li>
+      <li><b>نام این کامپیوتر:</b> هر نامی که بعداً در سامانه بشناسید، مثلاً «صندوق ۱» یا «انبار».</li>
+      <li>«اتصال» را بزنید. اگر موفق باشد وضعیت بالای صفحه «در حال کار» می‌شود و تیک ✓ کنار تب اتصال می‌آید.</li>
+    </ol>
+    <p class="muted small">اگر خطا آمد: کد منقضی یا مصرف‌شده است (کد جدید بگیرید)، آدرس اشتباه است، یا قابلیت برای تولیدی روشن نیست.</p>
+
+    <h3>قدم ۳ — تب «۲ چاپگر»</h3>
+    <ol>
+      <li>چاپگر لیبل را از فهرست انتخاب کنید. برنامه هرگز از چاپگر پیش‌فرض ویندوز استفاده نمی‌کند.</li>
+      <li>زبان چاپگر (TSPL یا ZPL)، رزولوشن (معمولاً ۲۰۳) و اندازه‌ی لیبل را طبق دفترچه‌ی چاپگر وارد کنید. برنامه نمی‌تواند درستی آن را بفهمد؛ اشتباه یعنی لیبل خراب.</li>
+      <li>«ذخیره چاپگر» را بزنید.</li>
+    </ol>
+
+    <h3>قدم ۴ — آزمون</h3>
+    <ol>
+      <li>از سامانه فقط یک کار آزمایشی با یک نسخه بفرستید.</li>
+      <li>در تب «۳ کنترل و کارها» وضعیت را ببینید. «به صف ویندوز رفت» یعنی ویندوز کار را گرفته، نه اینکه لیبل بیرون آمده. لیبل را خودتان بررسی کنید.</li>
+    </ol>
+
+    <h3>کارهای روزمره</h3>
+    <ul>
+      <li><b>توقف ارسال:</b> مثلاً هنگام عوض کردن کاغذ. کار جدیدی گرفته یا چاپ نمی‌شود.</li>
+      <li><b>لغو کار:</b> فقط کارهایی که هنوز به چاپگر نرفته‌اند.</li>
+      <li><b>بستن پنجره:</b> برنامه در پس‌زمینه کار می‌کند. برای بستن کامل، «بستن کامل برنامه» را بزنید.</li>
+      <li><b>اجرا با ویندوز:</b> با تیک در تب ۳ روشن/خاموش می‌شود.</li>
+      <li><b>کار «نامعلوم»:</b> هرگز خودکار دوباره چاپ نمی‌شود. لیبل را ببینید و اگر لازم بود از سامانه کار جدید بسازید.</li>
+    </ul>
+  </section>
+  </div>
 
   <footer>
     <button id="btn-quit" class="btn secondary">بستن کامل برنامه</button>
