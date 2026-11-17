@@ -123,8 +123,10 @@ function deleteJob(j) {
     act(api(`/api/jobs/${j.id}/spooler-delete`, { confirm: true }));
 }
 
+$('btn-origin-edit').addEventListener('click', () => { $('origin-fixed').hidden = true; $('origin-edit').hidden = false; $('in-origin').focus(); });
 $('connect-form').addEventListener('submit', async (e) => {
   e.preventDefault();
+  $('in-origin').value = $('in-origin').value.trim().replace(/\/+$/, '');
   const btn = e.submitter; btn.disabled = true;
   const r = await act(api('/api/pair', { origin: $('in-origin').value, code: $('in-code').value, name: $('in-name').value }));
   btn.disabled = false; if (r && r.ok) { $('in-code').value = ''; showTab('printer'); }

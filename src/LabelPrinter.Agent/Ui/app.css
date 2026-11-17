@@ -42,3 +42,4 @@ summary{cursor:pointer}footer{display:flex;gap:12px;align-items:center;flex-wrap
 .link{font:inherit;font-size:12.5px;background:none;border:0;padding:0;color:var(--blue);cursor:pointer;text-decoration:underline}
 .guide h3{font-size:15px;margin:18px 0 6px}.guide ul,.guide ol{margin:6px 0;padding-inline-start:22px}.guide li{margin:4px 0}
 .guide .note{list-style:none;margin-inline-start:-22px;border:1px solid var(--amber);border-radius:10px;padding:10px 14px}
+.origin-fixed p{margin:4px 0}.origin-fixed b{font-size:16px}

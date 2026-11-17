@@ -34,8 +34,11 @@
       <button id="btn-unpair" class="btn secondary">قطع اتصال</button>
     </div>
     <form id="connect-form" autocomplete="off">
-      <label>آدرس سرور <input id="in-origin" dir="ltr" placeholder="https://erp.example.com" required></label>
-      <p class="hint">همان آدرسی که ERP را با آن در مرورگر باز می‌کنید؛ فقط با https.</p>
+      <div id="origin-fixed" class="origin-fixed">
+        <p>سرور: <b dir="ltr">https://poshakerp.top</b> <span class="tick">✓</span></p>
+        <p class="hint">برای همه‌ی تولیدی‌ها همین است و لازم نیست چیزی بنویسید. <button type="button" class="link" id="btn-origin-edit">تغییر سرور (فقط برای آزمایش)</button></p>
+      </div>
+      <label id="origin-edit" hidden>آدرس سرور (فقط برای آزمایش) <input id="in-origin" dir="ltr" value="https://poshakerp.top" required></label>
       <label>کد اتصال <input id="in-code" dir="ltr" autocomplete="off" placeholder="7K3M-9QX2" required></label>
       <p class="hint">کد ۸ حرفی یک‌بار مصرف است و ۱۰ دقیقه اعتبار دارد؛ از سامانه ساخته می‌شود. <button type="button" class="link" data-goto="guide">کد را از کجا بگیرم؟</button></p>
       <label>نام این کامپیوتر <input id="in-name" placeholder="مثلاً صندوق ۱"></label>
@@ -101,7 +104,7 @@
   <div class="panel" role="tabpanel" id="panel-guide" aria-labelledby="tab-guide" hidden>
   <section class="card guide">
     <h2>راهنمای اتصال، قدم‌به‌قدم</h2>
-    <p class="muted">این نسخه آزمایشی است و فقط برای سرور آزمایشی/دمو در نظر گرفته شده، نه کار روزمره.</p>
+    <p class="muted">این نسخه آزمایشی است و برای کار روزمره نیست.</p>
 
     <h3>قبل از شروع</h3>
     <ul>
@@ -118,7 +121,7 @@
 
     <h3>قدم ۲ — پر کردن تب «۱ اتصال»</h3>
     <ol>
-      <li><b>آدرس سرور:</b> آدرس سایتی که ERP را با آن باز می‌کنید، با https و بدون چیز اضافه، مثلاً <bdi dir="ltr">https://demo.poshakerp.top</bdi>. آدرس اشتباه یا http پذیرفته نمی‌شود.</li>
+      <li><b>آدرس سرور:</b> از قبل <bdi dir="ltr">https://poshakerp.top</bdi> نوشته شده و برای همه‌ی تولیدی‌ها یکی است؛ چیزی تغییر ندهید. فقط برای آزمایش روی سرور دمو می‌توانید «تغییر سرور» را بزنید و <bdi dir="ltr">https://demo.poshakerp.top</bdi> بنویسید. http پذیرفته نمی‌شود.</li>
       <li><b>کد اتصال:</b> همان کد ۸ حرفی را بنویسید یا بچسبانید.</li>
       <li><b>نام این کامپیوتر:</b> هر نامی که بعداً در سامانه بشناسید، مثلاً «صندوق ۱» یا «انبار».</li>
       <li>«اتصال» را بزنید. اگر موفق باشد وضعیت بالای صفحه «در حال کار» می‌شود و تیک ✓ کنار تب اتصال می‌آید.</li>
