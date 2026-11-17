@@ -47,6 +47,18 @@ internal static class Winspool
     [DllImport("winspool.drv", EntryPoint = "GetJobW", SetLastError = true, CharSet = CharSet.Unicode)]
     public static extern bool GetJob(IntPtr handle, int jobId, int level, IntPtr buffer, int size, out int needed);
 
+    [DllImport("winspool.drv", SetLastError = true)]
+    public static extern bool SetJob(IntPtr handle, int jobId, int level, IntPtr jobInfo, int command);
+    public const int JOB_CONTROL_DELETE = 5;
+
+    /// <summary>Asks the Windows spooler to delete one job. True if the spooler accepted the request.</summary>
+    public static bool DeleteJob(string queue, int jobId)
+    {
+        if (!OpenPrinter(queue, out var handle, IntPtr.Zero)) return false;
+        try { return SetJob(handle, jobId, 0, IntPtr.Zero, JOB_CONTROL_DELETE); }
+        finally { ClosePrinter(handle); }
+    }
+
     /// <summary>Queue names visible to this user. The default printer is deliberately not identified.</summary>
     public static IReadOnlyList<string> PrinterNames()
     {

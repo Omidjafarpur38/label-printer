@@ -13,9 +13,9 @@ commands, unchanged, to one Windows print queue that you select. Rendering happe
 | Windows | x64. Built on .NET 10, which Microsoft supports on Windows 11 and the Windows 10 LTSC/Enterprise editions it lists; installer minimum is build 17763 (1809). Other Windows 10 editions may run it but are outside Microsoft's support. |
 | Runtime | Self-contained: the .NET runtime ships inside the installation folder. Nothing else to install. |
 | Rights | No administrator rights. Installs to `%LOCALAPPDATA%\Programs\LabelPrinterAgent`. |
-| Execution model | A normal process of the logged-in user. No Windows Service. It runs while that user is logged in. |
+| Execution model | A normal process of the logged-in user, started at logon if you chose autostart. No Windows Service. It runs while that user is logged in. |
 | Data | `%LOCALAPPDATA%\LabelPrinterAgent` — journal, payloads awaiting submission, credential (DPAPI, current user), settings, log. |
-| Autostart | Off. You may enable it per user; see below. |
+| Autostart | An installer choice (on by default, visible, changeable in the control window). Starts without a window. |
 
 ## Before you install
 
@@ -26,80 +26,97 @@ commands, unchanged, to one Windows print queue that you select. Rendering happe
 
 ## Install
 
-Run the installer. It copies files and adds two Start-menu shortcuts. It does not pair, start, register
-autostart or print.
+Run the installer and finish the wizard. It asks two things, both optional:
+
+- **Start automatically when Windows starts** (checked): the agent then runs in the background without a window.
+- **Desktop icon**.
+
+At the end, "Open Label Printer Agent now" opens the control window. The installer does not pair, select a
+printer or print; the program stays idle until you do both.
 
 Silent: `LabelPrinterAgent-<version>-win-x64-unsigned-setup.exe /VERYSILENT /SUPPRESSMSGBOXES`
+(add `/TASKS="!autostart"` to skip autostart).
 
-## Configure (in a Command Prompt in the installation folder)
+## The control window
 
-```
-LabelPrinterAgent.exe selftest
-LabelPrinterAgent.exe printers
-LabelPrinterAgent.exe select-printer --queue "EXACT QUEUE NAME" --language tspl --dpi 203 --width-mm 50 --height-mm 30
-```
+Open **Start menu → Label Printer Agent (experimental) → Label Printer Agent** (or the desktop icon). A window
+opens with its own taskbar entry. It is a local web page shown by Microsoft Edge in app mode (Chrome, then the
+default browser, if Edge is missing). Closing the window does not stop the agent; it keeps working in the
+background. **Quit completely** is the button at the bottom of the window.
 
-- The agent never uses the default printer. It uses only the queue named here.
-- Language (`tspl` or `zpl`), DPI (203, 300 or 600) and label size are **your declaration**. The agent cannot
-  detect them. A wrong language sends commands the printer does not understand.
-- The queue must be able to pass RAW data to the printer (the vendor driver or "Generic / Text Only").
+Three steps, in order:
 
-## Pair with a test ERP
+1. **Connect to the server.** Enter the ERP address (`https://…`), the pairing code (created in the ERP's label
+   printing section; valid 10 minutes, works once) and a name for this computer.
+2. **Printer.** Choose the print queue, the printer language (TSPL or ZPL), the resolution and the label size.
+   The agent never uses the Windows default printer. Language and resolution are *your declaration*; the agent
+   cannot check them. A wrong choice wastes labels.
+3. **Control.**
+   - **Stop sending / Continue sending** pauses the agent: no new jobs are taken or printed (for example while
+     you change the paper). Jobs already taken wait and continue with "Continue".
+   - **Start with Windows** switches autostart on or off.
 
-1. In the ERP (label printing must be enabled for your tenant), create a pairing code. It is valid for
-   10 minutes and works once.
-2. Run and type the code when asked (it is not shown and is not a command-line argument):
+The **job list** shows each job's state in plain words and offers only safe actions:
 
-```
-LabelPrinterAgent.exe pair --origin https://your-test-erp.example --name "Test PC"
-```
+| State | Meaning | Actions |
+|---|---|---|
+| Waiting to be sent | taken, nothing sent to the printer yet | **Cancel** — nothing will be printed |
+| Went to the Windows queue | Windows has the job; this does *not* prove a label came out | **Delete from the Windows queue** — the job becomes *unknown* |
+| Printed (Windows confirmed) | Windows reported the job printed | — |
+| Failed — nothing printed | known failure before anything was sent | — |
+| Cancelled | | — |
+| Outcome unknown | a send was started and its result could not be determined | none. It is **never sent again automatically**. Check the label, mark it in the ERP, and reprint from the ERP if needed (that creates a new job). |
 
-Only `https://` origins are accepted. The credential returned by the ERP is stored encrypted for your
-Windows account and is never printed or logged.
+There is deliberately no "retry" or "send again" button.
 
-## Run
-
-```
-LabelPrinterAgent.exe run          (foreground; Ctrl+C stops it)
-LabelPrinterAgent.exe status
-LabelPrinterAgent.exe stop --wait 30
-```
-
-`run` refuses to start if the agent is not paired, no printer is selected, or the selected queue does not
-exist. At start it registers the selected printer with the ERP; create a printer profile for it in the ERP
-and send a test print from there.
-
-Optional background start at logon, for this user only:
-
-```
-LabelPrinterAgent.exe autostart enable
-LabelPrinterAgent.exe autostart disable
-```
+If the window shows **Quarantine**, the ERP knows of events this computer has no record of (for example an old
+backup of the journal was restored). Nothing is printed until you read `recovery.md` and clear it.
 
 ## First test print
 
-Use the ERP's test print, **one job, one copy**, with labels you can afford to waste. Check the label by
-eye. "Submitted to spooler" in the ERP means Windows took the job; it does not mean a label was printed.
+Use the ERP's test print: **one job, one copy**, with labels you can afford to waste. Look at the label. "Went to
+the Windows queue" means Windows took the job; it does not mean a label was printed.
+
+## Command line (optional, for support)
+
+Everything above is also available in a Command Prompt in the installation folder:
+
+```
+LabelPrinterAgent.exe status
+LabelPrinterAgent.exe printers
+LabelPrinterAgent.exe select-printer --queue "NAME" --language tspl --dpi 203 --width-mm 50 --height-mm 30
+LabelPrinterAgent.exe pair --origin https://your-erp.example
+LabelPrinterAgent.exe run            (foreground, no window; Ctrl+C stops)
+LabelPrinterAgent.exe gui            (agent + control window, same as the Start-menu icon)
+LabelPrinterAgent.exe stop --wait 30
+LabelPrinterAgent.exe autostart enable|disable|status
+LabelPrinterAgent.exe selftest
+```
+
+`run` refuses to start if the agent is not paired, no printer is selected, or the queue does not exist. Only one
+instance can run at a time (a second one exits, or just opens the window).
 
 ## Diagnostics
 
-- `LabelPrinterAgent.exe status` — pairing, printer, job counts, blocked reports, unknown jobs, quarantine.
-- Log: `%LOCALAPPDATA%\LabelPrinterAgent\agent.log` (codes and ids only; no credential, no label content).
+- The window's banner and status pill say what is wrong in plain words; "Event log" at the bottom shows details.
+- Log file: `%LOCALAPPDATA%\LabelPrinterAgent\agent.log` (codes and ids only; no credential, no label content).
 - `LabelPrinterAgent.exe spool-file --queue "NAME" --file sample.prn --yes` sends one file once to a queue.
 
 | Symptom | Meaning |
 |---|---|
-| exit 3 / "not paired" | run `pair` |
-| exit 4 / "no printer selected" or queue missing | run `select-printer` |
-| "credential refused by ERP" | the agent was revoked or its credential expired; `unpair`, then `pair` again |
-| job stays "unknown" | the outcome of a submission could not be determined; it is not retried. Inspect the labels, resolve it in the ERP, and reprint from the ERP if needed (that creates a new job). |
-| "QUARANTINED" | see `recovery.md` |
-| "journal is corrupt" | see `recovery.md`; the agent will not run until this is handled |
+| "Needs a connection" | pair in step 1 |
+| "Needs a printer" / "printer not found" | choose the printer in step 2 (the queue may have been renamed or removed) |
+| "Access refused" | the agent was revoked in the ERP or its credential expired; disconnect and connect again |
+| "Another instance is running" | close the other one (Quit completely), or use the existing window |
+| a job stays "unknown" | see the table above; it is never retried |
+| "Quarantine" / "journal problem" | see `recovery.md` |
+| the window does not open | start `LabelPrinterAgentBg.exe` again; it reopens the window of the running agent |
 
 ## Upgrade
 
-Run the newer installer. It asks a running agent to stop, replaces program files and leaves the data
-directory untouched. Start the agent again afterwards (or log off and on if autostart is enabled).
+Run the newer installer. It asks a running agent to stop (waiting for its current server call), replaces program
+files and leaves the data directory untouched. Your autostart choice is kept: an upgrade never switches
+autostart back on. Open the window again afterwards.
 
 ## Remove
 

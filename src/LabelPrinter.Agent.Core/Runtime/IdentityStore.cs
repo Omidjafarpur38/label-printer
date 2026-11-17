@@ -113,7 +113,7 @@ public sealed class IdentityStore(string directory, ISecretProtector protector, 
 /// <summary>Operator-declared printer. Language, DPI and media are statements by the operator, not detections.</summary>
 public sealed record PrinterSelection(Guid LocalPrinterId, string Queue, string Language, int Dpi, double WidthMm, double HeightMm, Guid? ErpPrinterId = null);
 
-public sealed record AgentSettings(PrinterSelection? Printer = null)
+public sealed record AgentSettings(PrinterSelection? Printer = null, bool Paused = false)
 {
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 

@@ -1,25 +1,31 @@
+using System.Collections.Concurrent;
 using System.Reflection;
 using System.Runtime.InteropServices;
-using LabelPrinter.Agent.Core;
-using LabelPrinter.Agent.Core.Erp;
-using LabelPrinter.Agent.Core.Jobs;
-using LabelPrinter.Agent.Core.Journal;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using LabelPrinter.Agent.Core.Runtime;
 using LabelPrinter.Agent.Core.Spooling;
 using LabelPrinter.Agent.Windows;
 
 namespace LabelPrinter.Agent;
 
-/// <summary>Size-capped text log. Callers pass codes and ids only; no credential or payload ever reaches it.</summary>
+/// <summary>Size-capped text log with a short in-memory tail for the UI. Callers pass codes and ids only; no
+/// credential or payload ever reaches it.</summary>
 internal sealed class FileLog(string directory, bool echo)
 {
     private const long MaxBytes = 1024 * 1024;
     private readonly Lock _gate = new();
+    private readonly ConcurrentQueue<string> _tail = new();
     private string LogPath => Path.Combine(directory, "agent.log");
+
+    public IReadOnlyList<string> Recent(int count) => [.. _tail.TakeLast(count)];
 
     public void Write(string message)
     {
         var line = $"{DateTimeOffset.UtcNow:yyyy-MM-dd'T'HH:mm:ss'Z'} {message}";
+        _tail.Enqueue(line);
+        while (_tail.Count > 200 && _tail.TryDequeue(out _)) { }
         lock (_gate)
         {
             try
@@ -50,17 +56,23 @@ internal sealed class DevDiscardSpooler(Action<string> log) : ISpooler
     }
 }
 
-internal sealed class AgentHost(string dataDir)
+internal sealed record UiInfo(int Port, string Token);
+
+internal sealed class AgentHost(string dataDir, ISecretProtector? protectorOverride = null)
 {
     public const string ProductName = "LabelPrinterAgent";
     public string DataDir { get; } = dataDir;
     public string JournalPath => Path.Combine(DataDir, "journal.lpj");
     public string PayloadDir => Path.Combine(DataDir, "payloads");
+    public string UiInfoPath => Path.Combine(DataDir, "ui.json");
+    public string BrowserProfileDir => Path.Combine(DataDir, "browser");
 
     public static string Version =>
         (Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0").Split('+')[0];
 
     public static bool DevInsecure => !OperatingSystem.IsWindows() && Environment.GetEnvironmentVariable("LPAGENT_DEV_INSECURE") == "1";
+
+    public static IPlatform CreatePlatform() => OperatingSystem.IsWindows() ? new WindowsPlatform() : new DevPlatform();
 
     public static string DefaultDataDir() =>
         Environment.GetEnvironmentVariable("LPAGENT_DATA_DIR") is { Length: > 0 } custom
@@ -72,149 +84,75 @@ internal sealed class AgentHost(string dataDir)
         var created = !Directory.Exists(DataDir);
         Directory.CreateDirectory(DataDir);
         if (created && OperatingSystem.IsWindows()) Acl.RestrictDirectoryToCurrentUser(DataDir);
-        else if (created) File.SetUnixFileMode(DataDir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        else if (created && !OperatingSystem.IsWindows()) File.SetUnixFileMode(DataDir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
     }
 
     public IdentityStore Identities()
     {
+        if (protectorOverride is not null) return new IdentityStore(DataDir, protectorOverride);
         if (OperatingSystem.IsWindows()) return new IdentityStore(DataDir, new DpapiProtector(), Acl.RestrictToCurrentUser);
         if (!DevInsecure) throw new PlatformNotSupportedException("Credential storage is implemented for Windows only.");
         return new IdentityStore(DataDir, new DevPlainProtector(), p => { if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(p, UnixFileMode.UserRead | UnixFileMode.UserWrite); });
     }
 
-    public static IReadOnlyList<string> Queues() => OperatingSystem.IsWindows() ? Winspool.PrinterNames() : [];
+    private string Hash() => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(DataDir).ToUpperInvariant())))[..16];
+    private string StopEventName => "Local\\LabelPrinterAgent.Stop." + Hash();
+    private string InstanceName => "Local\\LabelPrinterAgent.Instance." + Hash();
 
-    private static string StopEventName(string dataDir) =>
-        "Local\\LabelPrinterAgent.Stop." + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(Path.GetFullPath(dataDir).ToUpperInvariant())))[..16];
+    /// <summary>Event that a running agent waits on; the installer and <c>stop</c> signal it.</summary>
+    public EventWaitHandle CreateStopEvent() =>
+        OperatingSystem.IsWindows() ? new EventWaitHandle(false, EventResetMode.ManualReset, StopEventName) : new ManualResetEvent(false);
 
-    /// <summary>Asks a running agent that uses this data directory to stop. Returns false if none was found.</summary>
     public bool SignalStop()
     {
-        if (!OperatingSystem.IsWindows()) return false;
-        if (!EventWaitHandle.TryOpenExisting(StopEventName(DataDir), out var handle)) return false;
+        if (!OperatingSystem.IsWindows()) return false; // named events exist on Windows only; elsewhere stop the process
+        if (!EventWaitHandle.TryOpenExisting(StopEventName, out var handle)) return false;
         using (handle) handle.Set();
         return true;
     }
 
-    /// <summary>True if another process holds the journal (the single-owner lock).</summary>
+    /// <summary>Takes the per-data-directory instance lock; null when another instance already holds it.</summary>
+    public Mutex? TryAcquireInstance()
+    {
+        var mutex = new Mutex(false, InstanceName);
+        try { if (mutex.WaitOne(0)) return mutex; }
+        catch (AbandonedMutexException) { return mutex; } // previous owner died; we own it now
+        mutex.Dispose();
+        return null;
+    }
+
+    public bool InstanceRunning()
+    {
+        if (!Mutex.TryOpenExisting(InstanceName, out var m)) return false;
+        m.Dispose();
+        return true;
+    }
+
+    /// <summary>True if another process holds the journal or the instance lock.</summary>
     public bool IsRunning()
     {
+        if (InstanceRunning()) return true;
         if (!File.Exists(JournalPath)) return false;
         try { using var probe = new FileStream(JournalPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None); return false; }
         catch (IOException) { return true; }
     }
 
-    /// <summary>
-    /// The agent loop. Refuses to start (and so never claims or submits) unless the agent is paired and a
-    /// printer has been selected explicitly and exists. Returns a process exit code.
-    /// </summary>
-    public int Run(bool echo, CancellationToken cancel)
+    public void WriteUiInfo(UiInfo info)
     {
-        EnsureDataDir();
-        var log = new FileLog(DataDir, echo);
-        var identities = Identities();
-        var identity = identities.Load();
-        if (identity is null || identities.Current() is null) { log.Write("not paired; run 'pair' first"); return 3; }
-
-        var settings = AgentSettings.Load(DataDir);
-        if (settings.Printer is not { } printer) { log.Write("no printer selected; run 'select-printer' first"); return 4; }
-        if (OperatingSystem.IsWindows() && !Winspool.PrinterNames().Contains(printer.Queue, StringComparer.OrdinalIgnoreCase))
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(info);
+        var tmp = UiInfoPath + ".tmp";
+        using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
         {
-            log.Write($"selected printer queue '{printer.Queue}' does not exist; not starting");
-            return 4;
+            if (OperatingSystem.IsWindows()) Acl.RestrictToCurrentUser(tmp); else File.SetUnixFileMode(tmp, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            fs.Write(bytes);
         }
-        if (!OperatingSystem.IsWindows() && !DevInsecure) { log.Write("printing is implemented for Windows only"); return 5; }
-
-        JobLedger ledger;
-        try
-        {
-            ledger = JobLedger.Open(new FileJournalStore(JournalPath), new FileBlobStore(PayloadDir), identity.AgentId, identity.Origin, TimeProvider.System, Guid.NewGuid, out var recovery);
-            log.Write($"journal opened: {recovery.RecordsReplayed} records, torn bytes {recovery.TornBytesDiscarded}, marked unknown {recovery.MarkedUnknown.Count}, resumable {recovery.Resumable.Count}");
-        }
-        catch (JournalLockedException) { log.Write("another agent instance owns this journal; not starting"); return 6; }
-        catch (JournalCorruptException ex) { log.Write("journal is corrupt and was not opened: " + ex.Message + " — see docs/recovery.md"); return 7; }
-        catch (JournalMismatchException ex) { log.Write("journal refused: " + ex.Message + " — see docs/recovery.md"); return 7; }
-
-        using (ledger)
-        using (var http = new HttpErpClient(identity.Origin, identities.Current, new HttpErpOptions { AgentVersion = Version, ClaimWaitSec = Math.Clamp(identity.ClaimWaitSec, 0, 15) }))
-        using (var stop = OperatingSystem.IsWindows() ? new EventWaitHandle(false, EventResetMode.ManualReset, StopEventName(DataDir)) : new ManualResetEvent(false))
-        {
-            if (ledger.QuarantineReason is { } reason) log.Write($"QUARANTINED ({reason}): nothing will be submitted until 'recover --clear-quarantine'");
-
-            // Tell the ERP which printer this agent was explicitly given, and learn the ERP's id for it.
-            Guid erpPrinterId;
-            try
-            {
-                var map = http.ReportPrinters([new PrinterReport(printer.LocalPrinterId, printer.Queue, printer.Queue, printer.Language, printer.Dpi, printer.WidthMm, printer.HeightMm)]);
-                erpPrinterId = map[printer.LocalPrinterId];
-                settings = settings with { Printer = printer with { ErpPrinterId = erpPrinterId } };
-                settings.Save(DataDir);
-            }
-            catch (Exception ex) when (ex is ErpException or ErpUnavailableException or KeyNotFoundException)
-            {
-                if (printer.ErpPrinterId is not { } known) { log.Write("could not register the printer with the ERP (" + ex.Message + "); not starting"); return 8; }
-                erpPrinterId = known;
-                log.Write("could not refresh the printer registration (" + ex.Message + "); continuing with the stored one");
-            }
-
-            WindowsRawSpooler? windowsSpooler = null;
-            ISpooler spooler;
-            if (OperatingSystem.IsWindows()) spooler = windowsSpooler = new WindowsRawSpooler(printer.Queue, erpPrinterId, log.Write);
-            else spooler = new DevDiscardSpooler(log.Write);
-
-            var sync = new ErpSync(ledger, http, spooler, TimeProvider.System) { Admit = settings.Refuse };
-            var runner = new AgentRunner(ledger, http, sync, identities, identity, TimeProvider.System, log.Write);
-            log.Write($"agent {Version} running: origin {identity.Origin}, agent {identity.AgentId}, printer '{printer.Queue}' {printer.Language} {printer.Dpi}dpi");
-
-            try
-            {
-                while (!cancel.IsCancellationRequested)
-                {
-                    if (OperatingSystem.IsWindows() && windowsSpooler is not null) WatchSpoolerJobs(ledger, windowsSpooler, printer.Queue, log);
-                    if (runner.RunOnce() is { } why)
-                    {
-                        log.Write("stopped: " + why);
-                        return why == RunnerStop.CredentialRejected ? 9 : 10;
-                    }
-                    if (WaitHandle.WaitAny([cancel.WaitHandle, stop], runner.LastDelay) != WaitHandle.WaitTimeout) break;
-                }
-                log.Write("stopped on request");
-                return 0;
-            }
-            catch (Exception ex) when (ex is JournalWriteException or LedgerFaultedException)
-            {
-                // Storage cannot be trusted right now. Stop; the next start recovers from what is really on disk.
-                log.Write("storage failure, stopping: " + ex.GetType().Name + " " + ex.Message);
-                return 11;
-            }
-        }
+        File.Move(tmp, UiInfoPath, overwrite: true);
     }
 
-    /// <summary>
-    /// Reports completion only when the Windows spooler itself flags the job as printed/complete. A job that
-    /// simply disappears from the queue proves nothing and is left as submitted_to_spooler.
-    /// </summary>
-    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private static void WatchSpoolerJobs(JobLedger ledger, WindowsRawSpooler spooler, string queue, FileLog log)
+    public UiInfo? ReadUiInfo()
     {
-        foreach (var (jobId, spoolJob) in spooler.Submitted.ToList())
-        {
-            if (ledger.Find(jobId) is not { State: JobState.SubmittedToSpooler }) { spooler.Submitted.Remove(jobId); continue; }
-            var status = Winspool.JobStatus(queue, spoolJob);
-            if (status is null) { spooler.Submitted.Remove(jobId); continue; }
-            if ((status & (Winspool.JOB_STATUS_PRINTED | Winspool.JOB_STATUS_COMPLETE)) != 0)
-            {
-                ledger.ConfirmCompleted(jobId, new Evidence(Evidence.SpoolerReportedComplete, "windows job status 0x" + status.Value.ToString("X", System.Globalization.CultureInfo.InvariantCulture)));
-                spooler.Submitted.Remove(jobId);
-                log.Write($"job {jobId}: spooler reports complete");
-            }
-            else if ((status & (Winspool.JOB_STATUS_DELETING | Winspool.JOB_STATUS_DELETED)) != 0)
-            {
-                ledger.MarkUnknown(jobId, "SPOOLER_JOB_DELETED");
-                spooler.Submitted.Remove(jobId);
-                log.Write($"job {jobId}: deleted from the spooler queue; outcome unknown");
-            }
-        }
+        try { return File.Exists(UiInfoPath) ? JsonSerializer.Deserialize<UiInfo>(File.ReadAllBytes(UiInfoPath)) : null; }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { return null; }
     }
 
     public static string OsDescription() => RuntimeInformation.OSDescription;

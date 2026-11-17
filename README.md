@@ -8,6 +8,7 @@ test build exists; it has not been used with a physical printer or a production 
 | Core: job identity, state machine, durable journal, outbox | implemented; automated tests |
 | ERP synchronisation and HTTPS transport | implemented; tested against a mock and, manually, against the real ERP backend on loopback |
 | Windows RAW spooler, DPAPI credential store | implemented; tested on a Windows CI runner with a file-backed print queue |
+| Control window (local Persian page in an Edge app window), autostart, single instance | implemented; tested on Linux and, for install behaviour, on Windows CI; **not seen on a real desktop** |
 | Installer (per-user, unsigned) | implemented; install/upgrade/uninstall tested on a Windows CI runner |
 | Physical printing | **not tested** |
 | Code signing, auto-update, Windows Service, command validation, journal compaction | not implemented |

@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>عامل چاپ لیبل</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header>
+  <img src="/icon.svg" alt="" width="36" height="36">
+  <div class="title"><h1>عامل چاپ لیبل</h1><span id="version" class="muted"></span></div>
+  <span id="pill" class="pill">…</span>
+</header>
+<main>
+  <section id="banner" class="banner" role="status" aria-live="polite" hidden></section>
+  <section id="toast" class="toast" role="status" aria-live="polite" hidden></section>
+
+  <section class="card" id="card-connect">
+    <h2><span class="num">۱</span> اتصال به سرور</h2>
+    <div id="connect-done" hidden>
+      <p>وصل است به: <b id="origin" dir="ltr"></b></p>
+      <p class="muted">نام این کامپیوتر در سرور: <span id="agent-name"></span></p>
+      <button id="btn-unpair" class="btn secondary">قطع اتصال</button>
+    </div>
+    <form id="connect-form" autocomplete="off">
+      <label>آدرس سرور <input id="in-origin" dir="ltr" placeholder="https://erp.example.com" required></label>
+      <label>کد اتصال (از بخش چاپ لیبل در سامانه ساخته می‌شود) <input id="in-code" dir="ltr" autocomplete="off" required></label>
+      <label>نام این کامپیوتر <input id="in-name" placeholder="مثلاً صندوق ۱"></label>
+      <button class="btn" type="submit">اتصال</button>
+    </form>
+  </section>
+
+  <section class="card" id="card-printer">
+    <h2><span class="num">۲</span> چاپگر</h2>
+    <p class="muted">برنامه فقط روی چاپگری که اینجا انتخاب می‌کنید چاپ می‌کند و هرگز از چاپگر پیش‌فرض ویندوز استفاده نمی‌کند.</p>
+    <form id="printer-form">
+      <label>چاپگر <select id="in-queue" required></select></label>
+      <div class="row">
+        <label>زبان چاپگر <select id="in-language"><option value="tspl">TSPL</option><option value="zpl">ZPL</option></select></label>
+        <label>رزولوشن <select id="in-dpi"><option>203</option><option>300</option><option>600</option></select></label>
+      </div>
+      <div class="row">
+        <label>عرض لیبل (mm) <input id="in-width" type="number" min="10" max="200" step="0.1" value="50" required></label>
+        <label>ارتفاع لیبل (mm) <input id="in-height" type="number" min="5" max="300" step="0.1" value="30" required></label>
+      </div>
+      <p class="muted">زبان و رزولوشن را شما اعلام می‌کنید؛ برنامه نمی‌تواند درستی آن را از چاپگر بفهمد. اشتباه، لیبل خراب یا چاپ بی‌معنی می‌دهد.</p>
+      <button class="btn" type="submit">ذخیره چاپگر</button>
+    </form>
+  </section>
+
+  <section class="card" id="card-control">
+    <h2><span class="num">۳</span> کنترل</h2>
+    <div class="row wrap">
+      <button id="btn-pause" class="btn big">توقف ارسال</button>
+      <label class="check"><input id="in-autostart" type="checkbox"> اجرا با روشن شدن ویندوز (بدون پنجره)</label>
+    </div>
+    <p id="pause-note" class="muted"></p>
+    <div id="quarantine" class="warn" hidden>
+      <b>قرنطینه:</b> سرور اتفاق‌هایی را می‌داند که این کامپیوتر در پرونده‌ی خود ندارد؛ پس چیزی چاپ نمی‌شود. ابتدا لیبل‌های واقعی را بررسی کنید.
+      <button id="btn-quarantine" class="btn danger">برداشتن قرنطینه…</button>
+    </div>
+  </section>
+
+  <section class="card" id="card-jobs">
+    <h2>کارهای چاپ <span id="outbox" class="muted"></span></h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>زمان</th><th>کار</th><th>وضعیت</th><th>توضیح</th><th>عملیات</th></tr></thead>
+        <tbody id="jobs"></tbody>
+      </table>
+    </div>
+    <p id="no-jobs" class="muted">هنوز کاری نیامده است.</p>
+    <p class="muted small">«به صف ویندوز رفت» یعنی ویندوز کار را گرفته؛ تضمین نمی‌کند لیبل بیرون آمده باشد. کار «نامعلوم» هرگز خودکار دوباره چاپ نمی‌شود؛ چاپ دوباره فقط از سامانه و به‌صورت کار جدید انجام می‌شود.</p>
+  </section>
+
+  <details class="card">
+    <summary>گزارش رویدادها</summary>
+    <pre id="log" dir="ltr"></pre>
+  </details>
+
+  <footer>
+    <button id="btn-quit" class="btn secondary">بستن کامل برنامه</button>
+    <span class="muted small">بستن این پنجره برنامه را نمی‌بندد؛ در پس‌زمینه کار می‌کند.</span>
+  </footer>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>

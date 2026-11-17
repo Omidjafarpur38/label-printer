@@ -9,6 +9,7 @@ $ErrorActionPreference = 'Stop'
 $app = Join-Path $env:LOCALAPPDATA 'Programs\LabelPrinterAgent'
 $data = Join-Path $env:LOCALAPPDATA 'LabelPrinterAgent'
 $exe = Join-Path $app 'LabelPrinterAgent.exe'
+$bgExe = Join-Path $app 'LabelPrinterAgentBg.exe'
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 
 function Check([bool] $condition, [string] $what) {
@@ -24,62 +25,99 @@ function Run-Setup([string] $file, [string[]] $arguments) {
   $p = Start-Process -FilePath $file -ArgumentList $arguments -Wait -PassThru
   if ($p.ExitCode -ne 0) { throw "$file exited $($p.ExitCode)" }
 }
+function Autostart-Value { return (Get-ItemProperty $runKey -ErrorAction SilentlyContinue).LabelPrinterAgent }
+function Wait-Until([scriptblock] $condition, [string] $what, [int] $seconds = 30) {
+  $until = (Get-Date).AddSeconds($seconds)
+  while ((Get-Date) -lt $until) { if (& $condition) { return }; Start-Sleep -Milliseconds 300 }
+  throw "FAILED: timed out waiting for $what"
+}
+function Panel-Session {
+  # What the Start-menu icon does: read the local panel address and token, exchange the token for the cookie.
+  Wait-Until { Test-Path (Join-Path $data 'ui.json') } 'the control panel to publish its address'
+  $info = Get-Content (Join-Path $data 'ui.json') -Raw | ConvertFrom-Json
+  $base = "http://127.0.0.1:$($info.Port)"
+  $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+  Invoke-WebRequest "$base/?t=$([uri]::EscapeDataString($info.Token))" -WebSession $session -UseBasicParsing -MaximumRedirection 5 | Out-Null
+  return @{ Base = $base; Session = $session }
+}
 
 Check (-not (Test-Path $app)) 'machine is clean: program folder absent'
 Check (-not (Test-Path $data)) 'machine is clean: data folder absent'
 
-Write-Host "`n== install $Version"
+Write-Host "`n== install $Version (silent: default choices)"
 Run-Setup $Installer @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$env:RUNNER_TEMP\install.log")
 Check (Test-Path $exe) 'console program installed'
-Check (Test-Path (Join-Path $app 'LabelPrinterAgentBg.exe')) 'background program installed'
+Check (Test-Path $bgExe) 'control-window program installed'
 Check (Test-Path (Join-Path $app 'setup-guide.md')) 'setup guide installed'
 Check ((Agent @('version')).Trim() -eq $Version) "reports version $Version"
 Check (-not (Test-Path $data)) 'installing created no data (no pairing, no journal)'
-Check ($null -eq (Get-ItemProperty $runKey -ErrorAction SilentlyContinue).LabelPrinterAgent) 'installing registered no autostart'
-Check (-not (Get-Process LabelPrinterAgent, LabelPrinterAgentBg -ErrorAction SilentlyContinue)) 'installing started nothing'
+Check (-not (Get-Process LabelPrinterAgent, LabelPrinterAgentBg -ErrorAction SilentlyContinue)) 'a silent install started nothing'
+$startMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Label Printer Agent (experimental)'
+Check (Test-Path (Join-Path $startMenu 'Label Printer Agent.lnk')) 'Start-menu icon exists'
+Check ((Autostart-Value) -like '*LabelPrinterAgentBg.exe" --background') 'autostart is on by default and starts without a window'
 
-Write-Host "`n== behaviour before configuration"
-Agent @('selftest') | Write-Host
-$status = Agent @('status')
-Check ($status -match 'paired\s+no') 'status: not paired'
-Check ($status -match 'none selected') 'status: no printer selected'
-& $exe run | Out-Null
-Check ($LASTEXITCODE -eq 3) "run refuses to start unpaired (exit $LASTEXITCODE)"
-$bg = Start-Process (Join-Path $app 'LabelPrinterAgentBg.exe') -Wait -PassThru
-Check ($bg.ExitCode -eq 3) "background program refuses to start unpaired (exit $($bg.ExitCode))"
+Write-Host "`n== idle until configured: the control panel runs, claims and prints nothing"
+$agentProc = Start-Process $bgExe -ArgumentList '--background' -PassThru
+$panel = Panel-Session
+$state = Invoke-RestMethod "$($panel.Base)/api/state" -WebSession $panel.Session
+Check ($state.state -eq 'NotPaired') 'unpaired: the panel says it needs a connection'
+Check ($null -eq $state.printer) 'no printer is selected by default'
+Check ($state.queues.Count -ge 1) 'the panel lists the Windows print queues'
+$denied = try { Invoke-WebRequest "$($panel.Base)/api/state" -UseBasicParsing -ErrorAction Stop; 200 } catch { [int]$_.Exception.Response.StatusCode }
+Check ($denied -eq 401) 'the panel refuses a request without the session cookie'
+$second = Start-Process $bgExe -ArgumentList '--background' -PassThru -Wait
+Check ($second.ExitCode -eq 0) 'a second launch exits at once (single instance)'
+Check (-not $agentProc.HasExited) 'the first instance is still running'
 
-Write-Host "`n== printer selection is explicit"
-& $exe select-printer --queue 'No Such Queue' --language tspl --dpi 203 --width-mm 50 --height-mm 30 2>&1 | Out-Null
-Check ($LASTEXITCODE -eq 2) 'a queue that does not exist is refused'
-if ($env:LP_TEST_PRINT_QUEUE) {
-  Check ((Agent @('printers')) -match [regex]::Escape($env:LP_TEST_PRINT_QUEUE)) 'test queue is listed'
-  Agent @('select-printer', '--queue', $env:LP_TEST_PRINT_QUEUE, '--language', 'tspl', '--dpi', '203', '--width-mm', '50', '--height-mm', '30') | Write-Host
-  & $exe run | Out-Null
-  Check ($LASTEXITCODE -eq 3) 'run still refuses: a selected printer is not enough without pairing'
+Write-Host "`n== configuring through the panel"
+function Post($path, $body) {
+  Invoke-RestMethod "$($panel.Base)$path" -Method Post -WebSession $panel.Session -ContentType 'application/json' -Headers @{ 'X-LP' = '1' } -Body ($body | ConvertTo-Json) -SkipHttpErrorCheck -StatusCodeVariable code | Out-Null
+  return $code
 }
+Check ((Post '/api/printer' @{ queue = 'No Such Queue'; language = 'tspl'; dpi = 203; widthMm = 50; heightMm = 30 }) -eq 400) 'a queue that does not exist is refused'
+if ($env:LP_TEST_PRINT_QUEUE) {
+  Check ((Post '/api/printer' @{ queue = $env:LP_TEST_PRINT_QUEUE; language = 'tspl'; dpi = 203; widthMm = 50; heightMm = 30 }) -eq 200) 'the test queue can be selected'
+  $state = Invoke-RestMethod "$($panel.Base)/api/state" -WebSession $panel.Session
+  Check ($state.state -eq 'NotPaired') 'a selected printer alone does not start anything: still needs a connection'
+}
+Check ((Post '/api/pause' @{ paused = $true }) -eq 200) 'pause works'
+Check ((Post '/api/pause' @{ paused = $false }) -eq 200) 'resume works'
 
-Write-Host "`n== opt-in autostart"
-Agent @('autostart', 'enable') | Write-Host
-Check ((Get-ItemProperty $runKey).LabelPrinterAgent -like '*LabelPrinterAgentBg.exe*') 'autostart entry points at the background program'
+Write-Host "`n== stop"
+Agent @('stop', '--wait', '30') | Write-Host
+Wait-Until { $agentProc.HasExited } 'the agent to exit after stop'
+Check $true 'stop closes the running agent (this is what the installer does before an upgrade)'
+Check (-not (Test-Path (Join-Path $data 'ui.json'))) 'the panel address file is removed on exit'
 
-Write-Host "`n== upgrade keeps data"
-# Stand-ins for a journal and a credential: the upgrade must leave every byte in the data folder alone.
+Write-Host "`n== console program rules"
+Agent @('selftest') | Write-Host
+& $exe run | Out-Null
+Check ($LASTEXITCODE -eq 3 -or $LASTEXITCODE -eq 4) "console 'run' still refuses to start unconfigured (exit $LASTEXITCODE)"
+
+Write-Host "`n== autostart choice"
+Agent @('autostart', 'disable') | Write-Host
+Check ($null -eq (Autostart-Value)) 'autostart can be switched off'
+
+Write-Host "`n== upgrade keeps data and the user's autostart choice"
 $marker = Join-Path $data 'journal.lpj'
 [IO.File]::WriteAllBytes($marker, [byte[]](1..64))
-$before = Get-ChildItem $data -Recurse -File | ForEach-Object { "$($_.Name) $((Get-FileHash $_.FullName).Hash)" } | Sort-Object
+$before = Get-ChildItem $data -Recurse -File | Where-Object { $_.Name -ne 'agent.log' -and $_.Name -ne 'ui.json' } | ForEach-Object { "$($_.Name) $((Get-FileHash $_.FullName).Hash)" } | Sort-Object
 Run-Setup $NextInstaller @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$env:RUNNER_TEMP\upgrade.log")
 Check ((Agent @('version')).Trim() -eq '99.0.0-upgradetest') 'upgraded program reports the new version'
-$after = Get-ChildItem $data -Recurse -File | ForEach-Object { "$($_.Name) $((Get-FileHash $_.FullName).Hash)" } | Sort-Object
+$after = Get-ChildItem $data -Recurse -File | Where-Object { $_.Name -ne 'agent.log' -and $_.Name -ne 'ui.json' } | ForEach-Object { "$($_.Name) $((Get-FileHash $_.FullName).Hash)" } | Sort-Object
 Check (($before -join '|') -eq ($after -join '|')) 'data folder is byte-identical after the upgrade'
-Check ((Get-ItemProperty $runKey).LabelPrinterAgent -like '*LabelPrinterAgentBg.exe*') 'autostart choice survives the upgrade'
+Check ($null -eq (Autostart-Value)) 'an upgrade does not re-enable autostart that the user switched off'
+Agent @('autostart', 'enable') | Write-Host
+Check ((Autostart-Value) -like '*LabelPrinterAgentBg.exe" --background') 'autostart can be switched on again'
 
 Write-Host "`n== uninstall (silent) keeps data, removes program and autostart"
 $uninstaller = Get-ChildItem $app -Filter 'unins*.exe' | Select-Object -First 1
 Run-Setup $uninstaller.FullName @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
 Start-Sleep -Seconds 3
 Check (-not (Test-Path $exe)) 'program removed'
-Check ($null -eq (Get-ItemProperty $runKey -ErrorAction SilentlyContinue).LabelPrinterAgent) 'autostart entry removed'
-$kept = Get-ChildItem $data -Recurse -File | ForEach-Object { "$($_.Name) $((Get-FileHash $_.FullName).Hash)" } | Sort-Object
+Check ($null -eq (Autostart-Value)) 'autostart entry removed'
+Check (-not (Test-Path (Join-Path $startMenu 'Label Printer Agent.lnk'))) 'Start-menu icon removed'
+$kept = Get-ChildItem $data -Recurse -File | Where-Object { $_.Name -ne 'agent.log' -and $_.Name -ne 'ui.json' } | ForEach-Object { "$($_.Name) $((Get-FileHash $_.FullName).Hash)" } | Sort-Object
 Check (($before -join '|') -eq ($kept -join '|')) 'data folder is byte-identical after a silent uninstall'
 Remove-Item $data -Recurse -Force
 Write-Host "`ninstaller smoke test passed"

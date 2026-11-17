@@ -43,6 +43,10 @@ public sealed class AgentRunner(
     private DateTimeOffset _credentialSetAt = identity.CredentialSetAt;
     private int _failures;
 
+    /// <summary>False after an iteration that got no usable answer or an ERP error; true after a clean one.</summary>
+    public bool ErpReachable { get; private set; } = true;
+    public DateTimeOffset? LastCleanAt { get; private set; }
+
     /// <summary>Delay chosen by the last iteration (exposed for tests and diagnostics).</summary>
     public TimeSpan LastDelay { get; private set; }
 
@@ -88,6 +92,8 @@ public sealed class AgentRunner(
             if (failure is null && !unavailable) ConfirmCredential();
         }
 
+        ErpReachable = failure is null && !unavailable;
+        if (ErpReachable) LastCleanAt = clock.GetUtcNow();
         if (failure is not null)
         {
             switch (failure.Status)

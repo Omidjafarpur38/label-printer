@@ -202,3 +202,39 @@ positives) and command syntax has many spellings (false negatives). No such filt
 - Payload files: only for Accepted jobs; removed after the single submission attempt, on failure/cancel, and by
   start-up cleanup (including files left by a crash before the acceptance record).
 - No logging exists yet. File permissions/ACLs are a deployment concern for the Windows service milestone.
+
+## Control window
+
+```
+src/LabelPrinter.Agent
+  AgentService.cs    owns the worker (ledger + ERP loop) and every operator action
+  UiServer.cs        local control panel on 127.0.0.1 (HttpListener)
+  UiHost.cs          process entry for LabelPrinterAgentBg.exe: single instance, panel, window
+  Platform.cs        everything OS-specific behind IPlatform (queues, spooler, autostart, window)
+  Ui/                index.html, app.js, app.css, manifest, icon (embedded resources)
+```
+
+- **Why a local web page:** it is testable on Linux/CI, works the same with a window or in the background,
+  needs no UI framework or package, and Edge (always present on Windows 10/11) can show it as a standalone
+  app window (`--app=`, own profile directory, no address bar). It is not an installed PWA: nothing is installed
+  in the browser and there is no service worker; a manifest is served only so the page can be installed by hand.
+- **Lifecycle:** `LabelPrinterAgentBg.exe --background` (autostart) takes the per-data-directory instance mutex,
+  starts the worker if paired and a printer is selected, serves the panel and writes `ui.json` (port, token,
+  user-only ACL). Without `--background` it also opens the window. A second launch finds the mutex taken, reads
+  `ui.json` and opens a window on the running instance, then exits.
+- **Worker states** (shown in the window): not paired, no printer, printer missing, starting, running,
+  credential rejected, contract unsupported, journal locked/problem, storage failure, failed. Configuration
+  changes (pair, unpair, printer) stop the worker, change the files, and start it again.
+- **Operator actions and what they can do to a job:**
+  - *cancel*: only Accepted → Cancelled (nothing was submitted);
+  - *delete from the Windows queue*: only SubmittedToSpooler; asks Windows to delete the job and records
+    **Unknown** whatever the answer means for the paper;
+  - *pause*: persisted flag; `ErpSync.Hold` stops claiming and submitting, while reports, acknowledgements,
+    cancellation and the authorization-expiry check keep working;
+  - *clear quarantine*: fails the still-Accepted jobs without printing them.
+  There is no route that submits, resubmits or retries a job; unknown routes answer 404 (tested).
+- **Panel security:** loopback listener and peer; `Host` must be a loopback name; a random token is exchanged
+  once for an HttpOnly SameSite=Strict cookie and removed from the URL; POSTs need `X-LP: 1`,
+  `application/json` and a same-origin `Origin`; strict CSP (`default-src 'none'`, same-origin script/style),
+  no framing, no caching, no referrer. Another program running as the same Windows user can read `ui.json` and
+  use the panel; this is the same trust boundary as the DPAPI-protected credential.

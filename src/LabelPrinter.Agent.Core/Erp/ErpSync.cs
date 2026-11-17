@@ -57,6 +57,10 @@ public sealed class ErpSync(JobLedger ledger, IErpClient erp, ISpooler spooler, 
     /// Returns a reason code to refuse a structurally valid job before its payload is downloaded.</summary>
     public Func<JobEnvelope, string?>? Admit { get; init; }
 
+    /// <summary>When it returns true nothing new is claimed and nothing is submitted (operator pause). Reports to the
+    /// ERP, acknowledgements, cancellation and the authorization-expiry check keep working.</summary>
+    public Func<bool>? Hold { get; init; }
+
     private static readonly string AcceptedWire = JobStateMachine.WireName(JobState.Accepted);
     private static readonly HashSet<string> ServerSubmittedStates = ["submitting", "submitted_to_spooler", "confirmed_completed"];
     private readonly ErpSyncOptions _options = options ?? new ErpSyncOptions();
@@ -72,7 +76,7 @@ public sealed class ErpSync(JobLedger ledger, IErpClient erp, ISpooler spooler, 
         Net(report, () => { if (ReconcileDue()) Reconcile(report); });
         Net(report, () => DeliverAccepts(report));
         Net(report, () => DeliverEvents(report));
-        if (claim && ledger.QuarantineReason is null) Net(report, () => Claim(report, claimMax));
+        if (claim && ledger.QuarantineReason is null && Hold?.Invoke() != true) Net(report, () => Claim(report, claimMax));
         Net(report, () => DeliverAccepts(report));
         SubmitReady(report); // local work proceeds even when the ERP is unreachable
         Net(report, () => DeliverEvents(report));
@@ -321,7 +325,7 @@ public sealed class ErpSync(JobLedger ledger, IErpClient erp, ISpooler spooler, 
                 if (ledger.Abandon(id, "AUTHORIZATION_EXPIRED")) report.Add(SyncReport.Abandoned, id, "AUTHORIZATION_EXPIRED");
                 _hold.Remove(id);
             }
-            else if (job.AcceptAcknowledged && !_hold.Contains(id) && ledger.QuarantineReason is null)
+            else if (job.AcceptAcknowledged && !_hold.Contains(id) && ledger.QuarantineReason is null && Hold?.Invoke() != true)
             {
                 var result = ledger.Submit(id, spooler);
                 report.Add(SyncReport.Submitted, id, JobStateMachine.WireName(result.State));

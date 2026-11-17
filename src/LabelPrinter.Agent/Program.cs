@@ -13,13 +13,9 @@ namespace LabelPrinter.Agent;
 internal static class Program
 {
 #if BACKGROUND
-    // Windowless build: runs the agent loop only. Started by opt-in autostart or by the user.
-    private static int Main()
-    {
-        using var cancel = new CancellationTokenSource();
-        AppDomain.CurrentDomain.ProcessExit += (_, _) => { try { cancel.Cancel(); } catch (ObjectDisposedException) { } };
-        return new AgentHost(AgentHost.DefaultDataDir()).Run(echo: false, cancel.Token);
-    }
+    // Windowless build (LabelPrinterAgentBg.exe): the agent plus its local control panel. Started at logon with
+    // --background (no window) or from the Start-menu icon (opens the window).
+    private static int Main(string[] args) => UiHost.Run(args);
 #else
     private const string Help = """
         LabelPrinterAgent — experimental label print agent (unsigned prerelease)
@@ -32,7 +28,8 @@ internal static class Program
           pair --origin https://HOST [--name NAME] [--code-file PATH]
                                           pair with an ERP; the pairing code is asked for, never passed as an argument
           unpair                          delete the stored credential (journal and settings are kept)
-          run                             run in the foreground until Ctrl+C
+          gui                             start the agent with its control window (same as the Start-menu icon)
+          run                             run in the foreground until Ctrl+C (no window)
           stop [--wait SECONDS]           ask a running agent to stop (and wait until it has)
           selftest                        local checks only: credential protection, file locking; no ERP, no printer
           autostart enable|disable|status start in the background at logon for this user (off by default)
@@ -61,6 +58,7 @@ internal static class Program
                 "pair" => Pair(host, args),
                 "unpair" => Unpair(host),
                 "run" => RunForeground(host),
+                "gui" => UiHost.Run(args),
                 "stop" => Stop(host, args),
                 "selftest" => SelfTest(),
                 "autostart" => AutostartCommand(args),
@@ -132,7 +130,7 @@ internal static class Program
     private static int Printers()
     {
         if (!OperatingSystem.IsWindows()) return Fail(5, "printer listing is implemented for Windows only");
-        var names = AgentHost.Queues();
+        var names = AgentHost.CreatePlatform().Queues();
         if (names.Count == 0) Console.WriteLine("(no print queues)");
         foreach (var n in names) Console.WriteLine(n);
         return 0;
@@ -148,7 +146,7 @@ internal static class Program
         var width = double.Parse(Required(args, "--width-mm"), CultureInfo.InvariantCulture);
         var height = double.Parse(Required(args, "--height-mm"), CultureInfo.InvariantCulture);
         if (width is < 10 or > 200 || height is < 5 or > 300) throw new ArgumentException("media size out of range (10–200 × 5–300 mm)");
-        if (OperatingSystem.IsWindows() && !AgentHost.Queues().Contains(queue, StringComparer.OrdinalIgnoreCase))
+        if (OperatingSystem.IsWindows() && !AgentHost.CreatePlatform().Queues().Contains(queue, StringComparer.OrdinalIgnoreCase))
             throw new ArgumentException($"no print queue named '{queue}'. Use 'printers' to list them.");
         if (host.IsRunning()) return Fail(6, "stop the agent before changing the printer");
 
@@ -231,7 +229,30 @@ internal static class Program
     {
         using var cancel = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cancel.Cancel(); };
-        return host.Run(echo: true, cancel.Token);
+        host.EnsureDataDir();
+        var log = new FileLog(host.DataDir, echo: true);
+        if (!OperatingSystem.IsWindows() && !AgentHost.DevInsecure) { log.Write("printing is implemented for Windows only"); return 5; }
+        using var instance = host.TryAcquireInstance();
+        if (instance is null) { log.Write("another agent instance is already running; not starting"); return 6; }
+        using var service = new AgentService(host, AgentHost.CreatePlatform(), log, TimeProvider.System);
+        switch (service.Start())
+        {
+            case WorkerState.NotPaired: log.Write("not paired; run 'pair' first"); return 3;
+            case WorkerState.NoPrinter or WorkerState.PrinterMissing: log.Write(service.Message + " Run 'select-printer' first."); return 4;
+            case WorkerState.JournalLocked: log.Write(service.Message); return 6;
+            case WorkerState.JournalProblem: log.Write(service.Message); return 7;
+        }
+        using var stop = host.CreateStopEvent();
+        while (service.WorkerAlive && WaitHandle.WaitAny([cancel.Token.WaitHandle, stop], 500) == WaitHandle.WaitTimeout) { }
+        service.StopWorker();
+        return service.State switch
+        {
+            WorkerState.CredentialRejected => 9,
+            WorkerState.ContractUnsupported => 10,
+            WorkerState.StorageFailure => 11,
+            WorkerState.Failed => 12,
+            _ => 0,
+        };
     }
 
     private static int Stop(AgentHost host, string[] args)
@@ -288,7 +309,7 @@ internal static class Program
                 throw new InvalidOperationException("journal of another origin was accepted");
             });
             if (OperatingSystem.IsWindows())
-                Step("print queues can be listed", () => Console.WriteLine($"      {AgentHost.Queues().Count} queue(s) visible"));
+                Step("print queues can be listed", () => Console.WriteLine($"      {AgentHost.CreatePlatform().Queues().Count} queue(s) visible"));
         }
         finally
         {
@@ -339,7 +360,7 @@ internal static class Program
         var queue = Required(args, "--queue");
         var bytes = File.ReadAllBytes(Required(args, "--file"));
         if (bytes.Length is 0 or > (int)ContractInfo.MaxPayloadBytes) throw new ArgumentException("file is empty or larger than 8 MiB");
-        if (!AgentHost.Queues().Contains(queue, StringComparer.OrdinalIgnoreCase)) throw new ArgumentException($"no print queue named '{queue}'");
+        if (!AgentHost.CreatePlatform().Queues().Contains(queue, StringComparer.OrdinalIgnoreCase)) throw new ArgumentException($"no print queue named '{queue}'");
         if (!Flag(args, "--yes")) return Fail(1, $"this sends {bytes.Length} bytes once, RAW, to '{queue}'. Re-run with --yes to confirm.");
         var printer = Guid.NewGuid();
         var spooler = new WindowsRawSpooler(queue, printer, Console.WriteLine);

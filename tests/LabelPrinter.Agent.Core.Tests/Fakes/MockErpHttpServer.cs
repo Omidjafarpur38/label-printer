@@ -90,7 +90,7 @@ public sealed class MockErpHttpServer : IDisposable
 
         const string prefix = HttpErpClient.ApiPath;
         if (!path.StartsWith(prefix, StringComparison.Ordinal)) { Error(ctx, 404, "SYSTEM_HTTP_ERROR"); return; }
-        if (request.Headers["Authorization"] != "Bearer " + Credential) { Error(ctx, 401, "AGENT_UNAUTHENTICATED"); return; }
+        if (!path.EndsWith("/pair", StringComparison.Ordinal) && request.Headers["Authorization"] != "Bearer " + Credential) { Error(ctx, 401, "AGENT_UNAUTHENTICATED"); return; }
         if (Revoked) { Error(ctx, 401, "AGENT_REVOKED"); return; }
 
         var route = path[prefix.Length..];
@@ -100,6 +100,9 @@ public sealed class MockErpHttpServer : IDisposable
             JsonNode json = body.Length > 0 ? JsonNode.Parse(body)! : new JsonObject();
             switch (request.HttpMethod, parts)
             {
+                case ("POST", ["pair"]):
+                    Json(ctx, new JsonObject { ["agentId"] = Rig.Agent.ToString("D"), ["credential"] = Credential, ["negotiatedContract"] = "0.1", ["serverTime"] = DateTimeOffset.UtcNow.ToString("O"), ["heartbeatSec"] = 30, ["claimWaitSec"] = 0 });
+                    break;
                 case ("POST", ["heartbeat"]):
                     Json(ctx, new JsonObject { ["negotiated"] = "0.1", ["serverTime"] = DateTimeOffset.UtcNow.ToString("O"), ["cancelJobIds"] = new JsonArray() });
                     break;
