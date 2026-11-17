@@ -1,12 +1,18 @@
 name: release
 
-# Publishes an UNSIGNED EXPERIMENTAL prerelease for a pushed tag v<version>.
-# The installer is built and install/upgrade/uninstall-tested by build-installer.yml from the tagged commit;
+# Publishes an UNSIGNED EXPERIMENTAL prerelease, either for a pushed tag v<version> or, when started by hand,
+# for the commit the workflow runs on (the tag v<version> is then created on exactly that commit by the release).
+# The installer is built and install/upgrade/uninstall-tested by build-installer.yml from that same commit;
 # the bytes that were tested and hashed there are the bytes attached to the release.
 
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Prerelease version without the leading v, e.g. 0.1.0-exp.1'
+        required: true
 
 permissions:
   contents: read
@@ -18,8 +24,16 @@ jobs:
       version: ${{ steps.v.outputs.version }}
     steps:
       - id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          v="${GITHUB_REF_NAME#v}"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            v="$INPUT_VERSION"
+            test "$GITHUB_REF" = "refs/heads/main" || { echo "Manual releases are made from main only."; exit 1; }
+          else
+            v="${GITHUB_REF_NAME#v}"
+          fi
+          case "$v" in *[!0-9A-Za-z.-]*|'') echo "Invalid version."; exit 1;; esac
           case "$v" in *-*) ;; *) echo "Only prerelease versions (with a '-suffix') are published by this workflow."; exit 1;; esac
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
@@ -82,7 +96,7 @@ jobs:
             "sizeBytes": ${{ needs.installer.outputs.size }},
             "sha256": "${{ needs.installer.outputs.sha256 }}",
             "commit": "${{ github.sha }}",
-            "tag": "${{ github.ref_name }}"
+            "tag": "v$v"
           }
           JSON
           {
@@ -102,8 +116,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" \
+          tag="v${{ needs.version.outputs.version }}"
+          if gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then echo "Release $tag already exists; published artifacts are never replaced."; exit 1; fi
+          gh release create "$tag" \
             "dist/${{ needs.installer.outputs.installer-name }}" dist/SHA256SUMS.txt dist/release-manifest.json \
-            --repo "${{ github.repository }}" --verify-tag --prerelease \
+            --repo "${{ github.repository }}" --target "${{ github.sha }}" --prerelease \
             --title "Label Printer Agent ${{ needs.version.outputs.version }} (experimental, unsigned)" \
             --notes-file notes.md
