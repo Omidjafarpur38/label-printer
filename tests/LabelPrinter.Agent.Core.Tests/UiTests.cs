@@ -374,3 +374,67 @@ public sealed class PauseHoldTests
         Check.Equal(0, b.R.Ledger.PendingEvents().Count, "outbox drained");
     }
 }
+
+/// <summary>The window never shows (or even receives) the server address or any port, and the embedded font and
+/// logo are served under the strict policy.</summary>
+public sealed class ControlPanelPrivacyTests : IDisposable
+{
+    private readonly PanelBench _b = new();
+    public void Dispose() => _b.Dispose();
+
+    [Test] public void ServerAddressAndPortsAreNeverSentToThePage()
+    {
+        _b.PairAndSelect();
+        var raw = _b.Http.GetStringAsync("/api/state").Result;
+        var erpUri = new Uri(_b.Erp.Origin);
+        Check.True(!raw.Contains("\"origin\"", StringComparison.OrdinalIgnoreCase), "no origin field in the state");
+        Check.True(!raw.Contains(erpUri.Authority, StringComparison.Ordinal), "server host:port is not in the state");
+        Check.True(!raw.Contains(_b.Ui.BaseUrl, StringComparison.Ordinal), "panel address is not in the state");
+        Check.True(!raw.Contains("poshakerp", StringComparison.OrdinalIgnoreCase), "built-in host is not in the state");
+        Check.True(_b.State()["paired"]!["name"]!.GetValue<string>() == "test pc", "the computer name is still shown");
+    }
+
+    [Test] public void PageSourcesContainNoServerAddress()
+    {
+        foreach (var path in new[] { "/", "/app.js", "/app.css", "/manifest.webmanifest" })
+        {
+            var body = _b.Http.GetStringAsync(path).Result;
+            Check.True(!body.Contains("poshakerp", StringComparison.OrdinalIgnoreCase), path + " has no server host");
+            Check.True(!body.Contains("https://", StringComparison.OrdinalIgnoreCase), path + " has no https address");
+        }
+        Check.True(!_b.Http.GetStringAsync("/").Result.Contains("in-origin"), "no address input in the page");
+    }
+
+    [Test] public void PairingWithoutAnAddressUsesTheBuiltInServerAndFailsClosedWhenUnreachable()
+    {
+        var res = _b.Post("/api/pair", new { code = "ABCD-1234", name = "x" });
+        Check.True(res.Status == 400, "built-in server is not reachable from the test, so it must fail, not connect elsewhere");
+        var msg = res.Body["message"]!.GetValue<string>();
+        Check.True(!msg.Contains("poshakerp", StringComparison.OrdinalIgnoreCase) && !msg.Contains("://"), "error does not name the server: " + msg);
+        Check.True(_b.State()["paired"] is null, "nothing was paired");
+    }
+
+    [Test] public void RedactorRemovesUrlsHostsAndPorts()
+    {
+        Check.Equal("failed [سرور] now", Redactor.Apply("failed https://poshakerp.top/api/x?y=1 now"), "url");
+        Check.Equal("no such host ([سرور])", Redactor.Apply("no such host (erp.example.com:443)"), "host:port");
+        Check.Equal("connect [سرور] refused", Redactor.Apply("connect 127.0.0.1:5123 refused"), "ipv4:port");
+        Check.Equal("[سرور]", Redactor.Apply("poshakerp.top"), "built-in host");
+        Check.Equal("[سرور] down", Redactor.Apply("shop.example.org down", "https://shop.example.org"), "origin host");
+        Check.Equal("agent.log is full", Redactor.Apply("agent.log is full"), "file names are left alone");
+        Check.Equal("", Redactor.Apply(null), "null");
+    }
+
+    [Test] public void FontAndLogosAreServedWithPolicyThatAllowsThem()
+    {
+        var f = _b.Http.GetAsync("/Vazirmatn-Regular.woff2").Result;
+        Check.Equal(HttpStatusCode.OK, f.StatusCode, "font");
+        Check.Equal("font/woff2", f.Content.Headers.ContentType!.MediaType!, "font type");
+        Check.True(f.Content.ReadAsByteArrayAsync().Result.Length > 10_000, "font bytes");
+        foreach (var p in new[] { "/icon.png", "/logo-light.png", "/logo-dark.png", "/Vazirmatn-Bold.woff2" })
+            Check.Equal(HttpStatusCode.OK, _b.Http.GetAsync(p).Result.StatusCode, p);
+        var csp = f.Headers.GetValues("Content-Security-Policy").Single();
+        Check.True(csp.Contains("font-src 'self'") && csp.Contains("default-src 'none'") && !csp.Contains("unsafe"), "csp: " + csp);
+        Check.True(f.Headers.Contains("Permissions-Policy") && f.Headers.Contains("Cross-Origin-Opener-Policy") && f.Headers.Contains("Cross-Origin-Resource-Policy"), "extra isolation headers");
+    }
+}

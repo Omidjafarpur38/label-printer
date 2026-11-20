@@ -7,6 +7,15 @@
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Company>Flow Poshak</Company>
+    <Product>Label Printer Agent</Product>
+    <Description>Windows print agent for the Flow Poshak production ERP (experimental)</Description>
+    <Copyright>Copyright (c) Flow Poshak</Copyright>
+    <NeutralLanguage>en</NeutralLanguage>
+    <DebugType>none</DebugType>
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishSingleFile>false</PublishSingleFile>
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="Ui\*" LogicalName="ui/%(Filename)%(Extension)" />

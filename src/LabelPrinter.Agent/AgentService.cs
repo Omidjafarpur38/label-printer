@@ -163,7 +163,7 @@ internal sealed class AgentService(AgentHost host, IPlatform platform, FileLog l
             var sync = new ErpSync(ledger, http, spooler, clock) { Admit = settings.Refuse, Hold = () => _paused };
             var runner = new AgentRunner(ledger, http, sync, identities, identity, clock, log.Write);
             if (ledger.QuarantineReason is { } reason) log.Write($"QUARANTINED ({reason}): nothing will be submitted until the quarantine is cleared");
-            log.Write($"agent {AgentHost.Version} running: origin {identity.Origin}, agent {identity.AgentId}, printer '{printer.Queue}' {printer.Language} {printer.Dpi}dpi");
+            log.Write($"agent {AgentHost.Version} running: agent {identity.AgentId}, printer '{printer.Queue}' {printer.Language} {printer.Dpi}dpi");
             Set(WorkerState.Running, "در حال کار");
 
             while (!ct.IsCancellationRequested)
@@ -207,8 +207,9 @@ internal sealed class AgentService(AgentHost host, IPlatform platform, FileLog l
     public ActionResult Pair(string origin, string code, string name)
     {
         string normalized;
-        try { normalized = HttpErpClient.OriginKey(origin); }
-        catch (ArgumentException) { return new(false, "آدرس سرور باید با https:// شروع شود، مثل https://erp.example.com"); }
+        // The window never sends an address: the built-in server is used. An explicit one is for tests/support only.
+        try { normalized = HttpErpClient.OriginKey(string.IsNullOrWhiteSpace(origin) ? Redactor.DefaultOrigin : origin); }
+        catch (ArgumentException) { return new(false, "نشانی سرور معتبر نیست."); }
         code = (code ?? "").Trim();
         if (code.Length is < 6 or > 20) return new(false, "کد اتصال درست به نظر نمی‌رسد.");
         name = string.IsNullOrWhiteSpace(name) ? Environment.MachineName : name.Trim();
@@ -220,7 +221,7 @@ internal sealed class AgentService(AgentHost host, IPlatform platform, FileLog l
         if (identities.Load() is { } existing)
             return new(false, string.Equals(existing.Origin, normalized, StringComparison.Ordinal)
                 ? "قبلاً وصل شده‌اید. برای اتصال دوباره، اول «قطع اتصال» را بزنید."
-                : $"این برنامه به {existing.Origin} وصل است. برای سرور دیگر باید اول قطع اتصال و پوشه‌ی داده جابه‌جا شود (راهنمای recovery.md).");
+                : "این برنامه به سرور دیگری وصل است. برای تغییر، اول قطع اتصال و پوشه‌ی داده جابه‌جا شود (راهنمای recovery.md).");
 
         using var http = new HttpErpClient(normalized, () => null, new HttpErpOptions { AgentVersion = AgentHost.Version });
         PairResult result;
@@ -235,7 +236,7 @@ internal sealed class AgentService(AgentHost host, IPlatform platform, FileLog l
         }
         catch (ErpUnavailableException)
         {
-            return new(false, "به سرور دسترسی پیدا نشد. اینترنت و آدرس را بررسی کنید. اگر کد مصرف شده بود، کد تازه بسازید.");
+            return new(false, "به سرور دسترسی پیدا نشد. اینترنت را بررسی کنید. اگر کد مصرف شده بود، کد تازه بسازید.");
         }
 
         var now = clock.GetUtcNow();

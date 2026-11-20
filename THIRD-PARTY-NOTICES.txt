@@ -11,4 +11,8 @@ Inno Setup (used to build the installer; the uninstaller is part of it)
   License: Inno Setup License - https://jrsoftware.org/files/is/license.txt
   https://jrsoftware.org/isinfo.php
 
+Vazirmatn font (Regular and Bold, embedded in the control window so Persian text looks the same on every PC)
+  Copyright 2015 The Vazirmatn Project Authors - https://github.com/rastikerdar/vazirmatn
+  License: SIL Open Font License 1.1 - full text in assets/brand/fonts/Vazirmatn-OFL.txt of the source repository
+
 The agent itself has no NuGet package dependencies.
