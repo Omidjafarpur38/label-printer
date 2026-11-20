@@ -102,7 +102,7 @@ internal static class Program
         }
         Console.WriteLine(identity is null
             ? "paired         no"
-            : $"paired         yes: origin {identity.Origin}, agent {identity.AgentId}, key id {keyId}, contract {identity.NegotiatedContract}, since {identity.PairedAt:u}");
+            : $"paired         yes (server address hidden), agent {identity.AgentId}, key id {keyId}, contract {identity.NegotiatedContract}, since {identity.PairedAt:u}");
 
         var settings = Directory.Exists(host.DataDir) ? AgentSettings.Load(host.DataDir) : new AgentSettings();
         Console.WriteLine(settings.Printer is { } p

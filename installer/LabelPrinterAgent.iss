@@ -35,6 +35,11 @@ InfoBeforeFile=..\docs\installer-notice.txt
 CloseApplications=no
 SetupLogging=yes
 SetupIconFile=..\src\LabelPrinter.Agent\app.ico
+WizardSmallImageFile=wizard-small.bmp
+VersionInfoCompany=Flow Poshak
+VersionInfoProductName=Label Printer Agent
+VersionInfoDescription=Label Printer Agent setup (experimental, unsigned)
+VersionInfoCopyright=Copyright (c) Flow Poshak
 UninstallDisplayIcon={app}\LabelPrinterAgentBg.exe
 
 [Tasks]

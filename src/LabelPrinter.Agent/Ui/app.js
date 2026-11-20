@@ -66,7 +66,7 @@ function render(s) {
   if (!initialTabChosen) { initialTabChosen = true; showTab(!s.paired ? 'connect' : !s.printer ? 'printer' : 'control'); }
   $('connect-done').hidden = !s.paired;
   $('connect-form').hidden = !!s.paired;
-  if (s.paired) { $('origin').textContent = s.paired.origin; $('agent-name').textContent = s.paired.name; }
+  if (s.paired) $('agent-name').textContent = s.paired.name;
 
   const sel = $('in-queue');
   if (document.activeElement !== sel) {
@@ -90,26 +90,44 @@ function render(s) {
   $('quarantine').hidden = !s.quarantine;
   $('outbox').textContent = (s.outbox.accepts + s.outbox.events) ? `(${s.outbox.accepts + s.outbox.events} گزارش در انتظار ارسال به سرور)` : '';
 
-  const body = $('jobs'); body.replaceChildren();
-  $('no-jobs').hidden = s.jobs.length > 0;
-  for (const j of s.jobs) {
-    const tr = document.createElement('tr');
-    const cell = (text, cls) => { const td = document.createElement('td'); td.textContent = text; if (cls) td.className = cls; tr.appendChild(td); return td; };
-    cell(fmt(j.updatedAt || j.createdAt));
-    cell(j.id.slice(0, 8) + (j.reprint ? ' (چاپ مجدد)' : '') + (j.copies > 1 ? ` ×${j.copies}` : ''), 'id');
-    const [text, cls] = JOB_STATE[j.state] || [j.state, ''];
-    cell(text, cls);
-    const notes = [];
-    if (j.error) notes.push('کد: ' + j.error);
-    if (j.spoolerJobRef) notes.push('شماره در صف: ' + j.spoolerJobRef);
-    if (j.blocked) notes.push(`گزارش به سرور گیر کرده (${j.blocked.code})`);
-    cell(notes.join(' · '));
-    const act = document.createElement('td');
-    if (j.state === 'accepted_by_agent') act.appendChild(button('لغو', 'btn small danger', () => cancelJob(j)));
-    if (j.state === 'submitted_to_spooler' && j.spoolerJobRef) act.appendChild(button('حذف از صف ویندوز', 'btn small secondary', () => deleteJob(j)));
-    tr.appendChild(act); body.appendChild(tr);
-  }
+  renderJobs(s.jobs);
   $('log').textContent = s.log.join('\n');
+}
+const DONE = new Set(['confirmed_completed']);
+const WAIT = new Set(['accepted_by_agent', 'submitting']);
+const BAD = new Set(['failed', 'cancelled', 'unknown']);
+const fa = (n) => Number(n).toLocaleString('fa-IR');
+function renderJobs(jobs) {
+  const list = $('jobs'); list.replaceChildren();
+  $('no-jobs').hidden = jobs.length > 0;
+  $('st-wait').textContent = fa(jobs.filter((j) => WAIT.has(j.state)).length);
+  $('st-queue').textContent = fa(jobs.filter((j) => j.state === 'submitted_to_spooler').length);
+  $('st-done').textContent = fa(jobs.filter((j) => DONE.has(j.state)).length);
+  $('st-bad').textContent = fa(jobs.filter((j) => BAD.has(j.state)).length);
+  for (const j of jobs) {
+    const li = document.createElement('li'); li.className = 'job';
+    const head = document.createElement('div'); head.className = 'head';
+    const [text, cls] = JOB_STATE[j.state] || [j.state, ''];
+    const st = document.createElement('span'); st.className = 'state ' + cls; st.textContent = text; head.appendChild(st);
+    if (j.reprint) { const b = document.createElement('span'); b.className = 'badge'; b.textContent = 'چاپ مجدد'; head.appendChild(b); }
+    const when = document.createElement('span'); when.className = 'when'; when.textContent = fmt(j.updatedAt || j.createdAt); head.appendChild(when);
+    li.appendChild(head);
+
+    const acts = document.createElement('div'); acts.className = 'acts';
+    if (j.state === 'accepted_by_agent') acts.appendChild(button('لغو', 'btn small danger', () => cancelJob(j)));
+    if (j.state === 'submitted_to_spooler' && j.spoolerJobRef) acts.appendChild(button('حذف از صف ویندوز', 'btn small secondary', () => deleteJob(j)));
+    li.appendChild(acts);
+
+    const meta = document.createElement('div'); meta.className = 'meta';
+    const add = (label, value, ltr) => { const s = document.createElement('span'); s.append(label + ': '); const v = document.createElement(ltr ? 'bdi' : 'span'); if (ltr) v.dir = 'ltr'; v.textContent = value; s.appendChild(v); meta.appendChild(s); };
+    add('کار', j.id.slice(0, 8), true);
+    add('تعداد نسخه', fa(j.copies));
+    if (j.spoolerJobRef) add('شماره در صف ویندوز', String(j.spoolerJobRef), true);
+    if (j.error) add('کد خطا', j.error, true);
+    if (j.blocked) add('گزارش به سرور گیر کرده', fa(j.blocked.count) + ' بار', false);
+    li.appendChild(meta);
+    list.appendChild(li);
+  }
 }
 function button(text, cls, fn) { const b = document.createElement('button'); b.className = cls; b.textContent = text; b.addEventListener('click', fn); return b; }
 
@@ -123,12 +141,10 @@ function deleteJob(j) {
     act(api(`/api/jobs/${j.id}/spooler-delete`, { confirm: true }));
 }
 
-$('btn-origin-edit').addEventListener('click', () => { $('origin-fixed').hidden = true; $('origin-edit').hidden = false; $('in-origin').focus(); });
 $('connect-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  $('in-origin').value = $('in-origin').value.trim().replace(/\/+$/, '');
   const btn = e.submitter; btn.disabled = true;
-  const r = await act(api('/api/pair', { origin: $('in-origin').value, code: $('in-code').value, name: $('in-name').value }));
+  const r = await act(api('/api/pair', { code: $('in-code').value, name: $('in-name').value }));
   btn.disabled = false; if (r && r.ok) { $('in-code').value = ''; showTab('printer'); }
 });
 $('btn-unpair').addEventListener('click', () => { if (confirm('اتصال این کامپیوتر به سرور قطع شود؟\nپرونده‌ی ثبت کارها نگه داشته می‌شود.')) act(api('/api/unpair', { confirm: true })); });

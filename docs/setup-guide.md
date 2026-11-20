@@ -46,8 +46,9 @@ background. **Quit completely** is the button at the bottom of the window.
 
 Three steps, in order:
 
-1. **Connect to the server.** Enter the ERP address (`https://…`), the pairing code (created in the ERP's label
-   printing section; valid 10 minutes, works once) and a name for this computer.
+1. **Connect to the server.** Enter the pairing code (created in the ERP's label printing section; valid 10
+   minutes, works once) and a name for this computer. The server address is built into the program and is never
+   shown or asked for in the window.
 2. **Printer.** Choose the print queue, the printer language (TSPL or ZPL), the resolution and the label size.
    The agent never uses the Windows default printer. Language and resolution are *your declaration*; the agent
    cannot check them. A wrong choice wastes labels.
@@ -85,7 +86,7 @@ Everything above is also available in a Command Prompt in the installation folde
 LabelPrinterAgent.exe status
 LabelPrinterAgent.exe printers
 LabelPrinterAgent.exe select-printer --queue "NAME" --language tspl --dpi 203 --width-mm 50 --height-mm 30
-LabelPrinterAgent.exe pair --origin https://your-erp.example
+LabelPrinterAgent.exe pair --origin https://your-erp.example   (technical/test use only: overrides the built-in server)
 LabelPrinterAgent.exe run            (foreground, no window; Ctrl+C stops)
 LabelPrinterAgent.exe gui            (agent + control window, same as the Start-menu icon)
 LabelPrinterAgent.exe stop --wait 30

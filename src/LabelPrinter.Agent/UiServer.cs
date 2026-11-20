@@ -92,7 +92,10 @@ internal sealed class UiServer : IDisposable
         ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
         ctx.Response.Headers["Referrer-Policy"] = "no-referrer";
         ctx.Response.Headers["X-Frame-Options"] = "DENY";
-        ctx.Response.Headers["Content-Security-Policy"] = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+        ctx.Response.Headers["Content-Security-Policy"] = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+        ctx.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), usb=(), serial=(), bluetooth=(), payment=(), clipboard-read=()";
+        ctx.Response.Headers["Cross-Origin-Opener-Policy"] = "same-origin";
+        ctx.Response.Headers["Cross-Origin-Resource-Policy"] = "same-origin";
 
         if (!IsLoopbackHost(req.Url.Host) || req.RemoteEndPoint is null || !IPAddress.IsLoopback(req.RemoteEndPoint.Address)) { Send(ctx, 403, "text/plain; charset=utf-8", "forbidden"u8.ToArray()); return; }
 
@@ -121,7 +124,11 @@ internal sealed class UiServer : IDisposable
             "/app.js" => ("app.js", "text/javascript; charset=utf-8"),
             "/app.css" => ("app.css", "text/css; charset=utf-8"),
             "/manifest.webmanifest" => ("manifest.webmanifest", "application/manifest+json"),
-            "/icon.svg" => ("icon.svg", "image/svg+xml"),
+            "/icon.png" => ("icon.png", "image/png"),
+            "/logo-light.png" => ("logo-light.png", "image/png"),
+            "/logo-dark.png" => ("logo-dark.png", "image/png"),
+            "/Vazirmatn-Regular.woff2" => ("Vazirmatn-Regular.woff2", "font/woff2"),
+            "/Vazirmatn-Bold.woff2" => ("Vazirmatn-Bold.woff2", "font/woff2"),
             _ => (null, null),
         };
         if (name is null) { Send(ctx, 404, "text/plain; charset=utf-8", "not found"u8.ToArray()); return; }
@@ -231,11 +238,11 @@ internal sealed class UiServer : IDisposable
         {
             version = AgentHost.Version,
             state = _service.State.ToString(),
-            message = _service.Message,
+            message = Redactor.Apply(_service.Message, identity?.Origin),
             paused = _service.Paused,
             erpReachable = _service.ErpReachable,
             lastCleanAt = _service.LastCleanAt,
-            paired = identity is null ? null : new { origin = identity.Origin, agentId = identity.AgentId, keyId = _service.CredentialKeyId(), pairedAt = identity.PairedAt, name = identity.DisplayName },
+            paired = identity is null ? null : new { agentId = identity.AgentId, keyId = _service.CredentialKeyId(), pairedAt = identity.PairedAt, name = identity.DisplayName },
             printer = settings.Printer is { } p ? new { queue = p.Queue, language = p.Language, dpi = p.Dpi, widthMm = p.WidthMm, heightMm = p.HeightMm } : null,
             queues,
             autostart = _service.Platform.AutostartEnabled,
@@ -254,7 +261,7 @@ internal sealed class UiServer : IDisposable
                 spoolerJobRef = j.SpoolerJobRef,
                 blocked = j.Block is null ? null : new { code = j.Block.Code, count = j.Block.Count },
             }),
-            log = _service.Log.Recent(40),
+            log = _service.Log.Recent(40).Select(l => Redactor.Apply(l, identity?.Origin)),
         };
     }
 

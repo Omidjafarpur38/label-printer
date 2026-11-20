@@ -3,15 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>عامل چاپ لیبل</title>
+<title>عامل چاپ لیبل — فلو پوشاک</title>
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="icon" href="/icon.png" type="image/png">
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
 <header>
-  <img src="/icon.svg" alt="" width="36" height="36">
-  <div class="title"><h1>عامل چاپ لیبل</h1><span id="version" class="muted"></span></div>
+  <picture class="logo">
+    <source srcset="/logo-dark.png" media="(prefers-color-scheme: dark)">
+    <img src="/logo-light.png" alt="فلو پوشاک" width="44" height="44">
+  </picture>
+  <div class="title"><h1>عامل چاپ لیبل <span class="brand">فلو پوشاک</span></h1><span id="version" class="muted"></span></div>
   <span id="pill" class="pill">…</span>
 </header>
 <main>
@@ -29,16 +32,11 @@
   <section class="card" id="card-connect">
     <h2>اتصال به سرور</h2>
     <div id="connect-done" hidden>
-      <p>وصل است به: <b id="origin" dir="ltr"></b></p>
-      <p class="muted">نام این کامپیوتر در سرور: <span id="agent-name"></span></p>
+      <p class="ok-line"><span class="tick">✓</span> این کامپیوتر به سامانه فلو پوشاک وصل است.</p>
+      <p class="muted">نام این کامپیوتر در سامانه: <b id="agent-name"></b></p>
       <button id="btn-unpair" class="btn secondary">قطع اتصال</button>
     </div>
     <form id="connect-form" autocomplete="off">
-      <div id="origin-fixed" class="origin-fixed">
-        <p>سرور: <b dir="ltr">https://poshakerp.top</b> <span class="tick">✓</span></p>
-        <p class="hint">برای همه‌ی تولیدی‌ها همین است و لازم نیست چیزی بنویسید. <button type="button" class="link" id="btn-origin-edit">تغییر سرور (فقط برای آزمایش)</button></p>
-      </div>
-      <label id="origin-edit" hidden>آدرس سرور (فقط برای آزمایش) <input id="in-origin" dir="ltr" value="https://poshakerp.top" required></label>
       <label>کد اتصال <input id="in-code" dir="ltr" autocomplete="off" placeholder="7K3M-9QX2" required></label>
       <p class="hint">کد ۸ حرفی یک‌بار مصرف است و ۱۰ دقیقه اعتبار دارد؛ از سامانه ساخته می‌شود. <button type="button" class="link" data-goto="guide">کد را از کجا بگیرم؟</button></p>
       <label>نام این کامپیوتر <input id="in-name" placeholder="مثلاً صندوق ۱"></label>
@@ -84,14 +82,15 @@
   </section>
 
   <section class="card" id="card-jobs">
-    <h2>کارهای چاپ <span id="outbox" class="muted"></span></h2>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>زمان</th><th>کار</th><th>وضعیت</th><th>توضیح</th><th>عملیات</th></tr></thead>
-        <tbody id="jobs"></tbody>
-      </table>
+    <h2>گزارش چاپ <span id="outbox" class="muted"></span></h2>
+    <div class="stats" id="stats" aria-live="polite">
+      <div class="stat"><b id="st-wait">۰</b><span>در انتظار</span></div>
+      <div class="stat"><b id="st-queue">۰</b><span>در صف ویندوز</span></div>
+      <div class="stat ok"><b id="st-done">۰</b><span>چاپ‌شده</span></div>
+      <div class="stat bad"><b id="st-bad">۰</b><span>ناموفق / نامعلوم</span></div>
     </div>
-    <p id="no-jobs" class="muted">هنوز کاری نیامده است.</p>
+    <ul class="jobs" id="jobs" aria-label="فهرست کارهای چاپ"></ul>
+    <p id="no-jobs" class="muted empty">هنوز کاری نیامده است. وقتی از سامانه چاپ بزنید، اینجا دیده می‌شود.</p>
     <p class="muted small">«به صف ویندوز رفت» یعنی ویندوز کار را گرفته؛ تضمین نمی‌کند لیبل بیرون آمده باشد. کار «نامعلوم» هرگز خودکار دوباره چاپ نمی‌شود؛ چاپ دوباره فقط از سامانه و به‌صورت کار جدید انجام می‌شود.</p>
   </section>
 
@@ -121,12 +120,12 @@
 
     <h3>قدم ۲ — پر کردن تب «۱ اتصال»</h3>
     <ol>
-      <li><b>آدرس سرور:</b> از قبل <bdi dir="ltr">https://poshakerp.top</bdi> نوشته شده و برای همه‌ی تولیدی‌ها یکی است؛ چیزی تغییر ندهید. فقط برای آزمایش روی سرور دمو می‌توانید «تغییر سرور» را بزنید و <bdi dir="ltr">https://demo.poshakerp.top</bdi> بنویسید. http پذیرفته نمی‌شود.</li>
+      <li><b>سرور:</b> آدرس سرور داخل برنامه ثابت است و برای همه‌ی تولیدی‌ها یکی است؛ لازم نیست چیزی بنویسید و نمایش داده هم نمی‌شود.</li>
       <li><b>کد اتصال:</b> همان کد ۸ حرفی را بنویسید یا بچسبانید.</li>
       <li><b>نام این کامپیوتر:</b> هر نامی که بعداً در سامانه بشناسید، مثلاً «صندوق ۱» یا «انبار».</li>
       <li>«اتصال» را بزنید. اگر موفق باشد وضعیت بالای صفحه «در حال کار» می‌شود و تیک ✓ کنار تب اتصال می‌آید.</li>
     </ol>
-    <p class="muted small">اگر خطا آمد: کد منقضی یا مصرف‌شده است (کد جدید بگیرید)، آدرس اشتباه است، یا قابلیت برای تولیدی روشن نیست.</p>
+    <p class="muted small">اگر خطا آمد: کد منقضی یا مصرف‌شده است (کد جدید بگیرید)، اینترنت قطع است، یا قابلیت برای تولیدی روشن نیست.</p>
 
     <h3>قدم ۳ — تب «۲ چاپگر»</h3>
     <ol>
