@@ -112,14 +112,32 @@ jobs:
             echo "| Commit | \`${{ github.sha }}\` |"
             echo "| Signature | **none** (unsigned) |"
           } > notes.md
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Sign the update manifest (only when the update signing key is configured)
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          v="${{ needs.version.outputs.version }}"
+          if [ -z "$UPDATE_SIGNING_KEY" ]; then
+            echo "UPDATE_SIGNING_KEY is not set: this release carries no update manifest, so installed copies are not offered it."
+            exit 0
+          fi
+          notes="$(awk '/^## What is new/{f=1;next} /^## /{f=0} f&&/^- /{print}' "docs/releases/$v.md" | head -3 | sed 's/\*\*//g; s/`//g' | tr '\n' ' ' | cut -c1-380)"
+          dotnet run tools/update/sign-update.cs -- sign --installer "dist/${{ needs.installer.outputs.installer-name }}" --version "$v" --out dist/update --notes "$notes"
+          # The pair must verify against the key built into the program, or installed copies would ignore it.
+          dotnet run tools/update/sign-update.cs -- verify --dir dist/update
       - name: Create the prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="v${{ needs.version.outputs.version }}"
           if gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then echo "Release $tag already exists; published artifacts are never replaced."; exit 1; fi
+          extra=()
+          if [ -f dist/update/agent-update.json ]; then extra=(dist/update/agent-update.json dist/update/agent-update.sig); fi
           gh release create "$tag" \
-            "dist/${{ needs.installer.outputs.installer-name }}" dist/SHA256SUMS.txt dist/release-manifest.json \
+            "dist/${{ needs.installer.outputs.installer-name }}" dist/SHA256SUMS.txt dist/release-manifest.json "${extra[@]}" \
             --repo "${{ github.repository }}" --target "${{ github.sha }}" --prerelease \
             --title "Label Printer Agent ${{ needs.version.outputs.version }} (experimental, unsigned)" \
             --notes-file notes.md

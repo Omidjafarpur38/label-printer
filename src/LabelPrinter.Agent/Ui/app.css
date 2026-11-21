@@ -68,3 +68,7 @@ header{border-bottom:2px solid var(--gold)}
 bdi,.ltr{unicode-bidi:isolate}
 @media (max-width:560px){.stats{grid-template-columns:repeat(2,1fr)}.job{grid-template-columns:1fr}}
 .job .when{direction:ltr;unicode-bidi:isolate}
+
+.update{display:flex;gap:10px 16px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.update[hidden]{display:none}
+.up-acts{display:flex;gap:8px}

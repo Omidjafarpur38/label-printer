@@ -199,6 +199,8 @@ internal sealed class UiServer : IDisposable
             case "pause": result = _service.SetPaused(Bool("paused")); break;
             case "autostart": result = _service.SetAutostart(Bool("enabled")); break;
             case "quarantine": result = Bool("confirm") ? _service.ClearQuarantine() : new(false, "تأیید لازم است."); break;
+            case "update" when parts.Length == 3 && parts[2] == "check": result = _service.Updates.CheckNow(); break;
+            case "update" when parts.Length == 3 && parts[2] == "install": result = Bool("confirm") ? _service.Updates.Install() : new(false, "تأیید لازم است."); break;
             case "quit": QuitRequested.Set(); result = new(true, "برنامه بسته می‌شود."); break;
             case "jobs" when parts.Length == 4 && Guid.TryParseExact(parts[2], "D", out var id):
                 // Exactly two job actions exist. There is deliberately no resubmit/retry route.
@@ -261,6 +263,14 @@ internal sealed class UiServer : IDisposable
                 spoolerJobRef = j.SpoolerJobRef,
                 blocked = j.Block is null ? null : new { code = j.Block.Code, count = j.Block.Count },
             }),
+            update = new
+            {
+                status = _service.Updates.Status.ToString(),
+                version = _service.Updates.Offer?.Version,
+                notes = _service.Updates.Offer?.Notes,
+                message = Redactor.Apply(_service.Updates.Message),
+                checkedAt = _service.Updates.CheckedAt,
+            },
             log = _service.Log.Recent(40).Select(l => Redactor.Apply(l, identity?.Origin)),
         };
     }

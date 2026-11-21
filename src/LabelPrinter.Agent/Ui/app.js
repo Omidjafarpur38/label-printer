@@ -18,6 +18,7 @@ const WORKER = {
 let current = null;
 let formsFilled = false;
 let initialTabChosen = false;
+let dismissedUpdate = '';
 
 function showTab(name) {
   for (const t of document.querySelectorAll('.tab')) {
@@ -91,7 +92,27 @@ function render(s) {
   $('outbox').textContent = (s.outbox.accepts + s.outbox.events) ? `(${s.outbox.accepts + s.outbox.events} گزارش در انتظار ارسال به سرور)` : '';
 
   renderJobs(s.jobs);
+  if (s.update) renderUpdate(s.update);
   $('log').textContent = s.log.join('\n');
+}
+function renderUpdate(u) {
+  const banner = $('update-banner');
+  const busy = u.status === 'Downloading' || u.status === 'Installing';
+  const offer = u.status === 'Available' && u.version && u.version !== dismissedUpdate;
+  banner.hidden = !(busy || offer);
+  if (!banner.hidden) {
+    $('up-ver').textContent = u.version || '';
+    $('up-notes').textContent = u.notes ? '— ' + u.notes : '';
+    $('up-busy').textContent = busy ? u.message : '';
+    $('btn-up-install').hidden = busy; $('btn-up-later').hidden = busy;
+  }
+  const lines = {
+    Disabled: u.message, Idle: 'هنوز بررسی نشده است.', Checking: 'در حال بررسی…', UpToDate: 'نسخه‌ی شما به‌روز است ✓',
+    Available: 'نسخه‌ی \u2066' + (u.version || '') + '\u2069 آماده‌ی نصب است.', Downloading: u.message, Installing: u.message, Failed: u.message,
+  };
+  const line = $('up-line');
+  line.textContent = (lines[u.status] || '') + (u.checkedAt && u.status !== 'Disabled' ? ' — آخرین بررسی: ' + fmt(u.checkedAt) : '');
+  $('btn-up-check').disabled = u.status === 'Disabled' || u.status === 'Checking' || busy;
 }
 const DONE = new Set(['confirmed_completed']);
 const WAIT = new Set(['accepted_by_agent', 'submitting']);
@@ -100,10 +121,10 @@ const fa = (n) => Number(n).toLocaleString('fa-IR');
 function renderJobs(jobs) {
   const list = $('jobs'); list.replaceChildren();
   $('no-jobs').hidden = jobs.length > 0;
-  $('st-wait').textContent = fa(jobs.filter((j) => WAIT.has(j.state)).length);
-  $('st-queue').textContent = fa(jobs.filter((j) => j.state === 'submitted_to_spooler').length);
-  $('st-done').textContent = fa(jobs.filter((j) => DONE.has(j.state)).length);
-  $('st-bad').textContent = fa(jobs.filter((j) => BAD.has(j.state)).length);
+  $('st-wait').textContent = String(jobs.filter((j) => WAIT.has(j.state)).length);
+  $('st-queue').textContent = String(jobs.filter((j) => j.state === 'submitted_to_spooler').length);
+  $('st-done').textContent = String(jobs.filter((j) => DONE.has(j.state)).length);
+  $('st-bad').textContent = String(jobs.filter((j) => BAD.has(j.state)).length);
   for (const j of jobs) {
     const li = document.createElement('li'); li.className = 'job';
     const head = document.createElement('div'); head.className = 'head';
@@ -154,6 +175,13 @@ $('printer-form').addEventListener('submit', async (e) => {
   const r = await act(api('/api/printer', { queue: $('in-queue').value, language: $('in-language').value, dpi: Number($('in-dpi').value), widthMm: Number($('in-width').value), heightMm: Number($('in-height').value) }));
   formsFilled = false;
   if (r && r.ok) showTab('control');
+});
+$('btn-up-check').addEventListener('click', () => act(api('/api/update/check', {})));
+$('btn-up-later').addEventListener('click', () => { if (current && current.update) dismissedUpdate = current.update.version || ''; $('update-banner').hidden = true; });
+$('btn-up-install').addEventListener('click', async () => {
+  if (!confirm('نسخه‌ی جدید نصب شود؟\nبرنامه چند ثانیه بسته و دوباره باز می‌شود. کار در حال ارسال کامل می‌شود و کاری از دست نمی‌رود.')) return;
+  const r = await act(api('/api/update/install', { confirm: true }));
+  if (r && r.ok) setTimeout(() => { try { window.close(); } catch { /* the new window opens by itself */ } }, 8000);
 });
 $('btn-pause').addEventListener('click', () => act(api('/api/pause', { paused: !(current && current.paused) })));
 $('in-autostart').addEventListener('change', (e) => act(api('/api/autostart', { enabled: e.target.checked })));

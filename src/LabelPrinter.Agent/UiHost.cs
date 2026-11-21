@@ -28,6 +28,7 @@ internal static class UiHost
 
         using var service = new AgentService(host, platform, log, TimeProvider.System);
         service.Start(); // not paired / no printer is a normal first-run state, shown in the window
+        service.Updates.Start(); // looks for a newer signed version; installs only when the user presses the button
         using var stop = host.CreateStopEvent();
         using var ui = new UiServer(service);
         ui.Start();
