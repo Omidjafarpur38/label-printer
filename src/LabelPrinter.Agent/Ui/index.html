@@ -19,6 +19,10 @@
 </header>
 <main>
   <section id="banner" class="banner" role="status" aria-live="polite" hidden></section>
+  <section id="update-banner" class="banner ok update" role="status" aria-live="polite" hidden>
+    <div class="up-text"><b>نسخه‌ی جدید <bdi dir="ltr" id="up-ver"></bdi> آماده است.</b> <span id="up-notes" class="muted small"></span> <span id="up-busy" class="small"></span></div>
+    <div class="up-acts"><button id="btn-up-install" class="btn" type="button">نصب و به‌روزرسانی</button> <button id="btn-up-later" class="btn secondary" type="button">بعداً</button></div>
+  </section>
   <section id="toast" class="toast" role="status" aria-live="polite" hidden></section>
 
   <nav class="tabs" role="tablist" aria-label="بخش‌های برنامه">
@@ -79,6 +83,13 @@
       <b>قرنطینه:</b> سرور اتفاق‌هایی را می‌داند که این کامپیوتر در پرونده‌ی خود ندارد؛ پس چیزی چاپ نمی‌شود. ابتدا لیبل‌های واقعی را بررسی کنید.
       <button id="btn-quarantine" class="btn danger">برداشتن قرنطینه…</button>
     </div>
+  </section>
+
+  <section class="card" id="card-update">
+    <h2>به‌روزرسانی</h2>
+    <p id="up-line" class="muted"></p>
+    <button id="btn-up-check" class="btn secondary" type="button">بررسی نسخه‌ی تازه</button>
+    <p class="muted small">برنامه خودش گاهی نسخه‌ی تازه را بررسی می‌کند و فقط خبر می‌دهد. چیزی بدون تأیید شما نصب نمی‌شود. نسخه‌ی تازه فقط وقتی قبول می‌شود که امضای رسمی سازنده را داشته باشد.</p>
   </section>
 
   <section class="card" id="card-jobs">

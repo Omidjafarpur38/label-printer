@@ -23,6 +23,8 @@ internal interface IPlatform
     bool AutostartEnabled { get; }
     void SetAutostart(bool enabled);
     void OpenWindow(string url, string profileDir);
+    /// <summary>Starts an already verified installer and returns at once (the installer stops this program itself).</summary>
+    bool LaunchInstaller(string path, string arguments);
 }
 
 [SupportedOSPlatform("windows")]
@@ -74,6 +76,18 @@ internal sealed class WindowsPlatform : IPlatform
     /// Opens the page in an app-mode browser window (no address bar, own taskbar entry, own profile), preferring
     /// Microsoft Edge, which ships with Windows 10/11. Falls back to Chrome, then to the default browser.
     /// </summary>
+    public bool LaunchInstaller(string path, string arguments)
+    {
+        try
+        {
+            // The installer was verified (size + SHA-256 against the signed manifest) by UpdateService just before.
+            var info = new ProcessStartInfo(path, arguments) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(path)! };
+            using var p = Process.Start(info);
+            return p is not null;
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException) { return false; }
+    }
+
     public void OpenWindow(string url, string profileDir)
     {
         var browser = FindBrowser();
@@ -123,4 +137,5 @@ internal sealed class DevPlatform : IPlatform
     public bool AutostartEnabled => _autostart;
     public void SetAutostart(bool enabled) => _autostart = enabled;
     public void OpenWindow(string url, string profileDir) => Console.WriteLine("open " + url);
+    public bool LaunchInstaller(string path, string arguments) => false;
 }

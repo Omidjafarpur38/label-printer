@@ -71,6 +71,10 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 ; Opens the control window after an interactive install. Silent installs never start anything.
 Filename: "{app}\LabelPrinterAgentBg.exe"; Description: "Open Label Printer Agent now"; Flags: postinstall nowait skipifsilent
 
+; Self-update (started by the program with /UPDATE=1 after the user pressed "install"): open the window again so
+; the person who was watching it sees the new version. A normal silent install never starts anything.
+Filename: "{app}\LabelPrinterAgentBg.exe"; Flags: nowait; Check: IsSelfUpdate
+
 ; Installing never pairs, selects a printer or prints. The program stays idle until the user does both.
 
 [UninstallDelete]
@@ -94,6 +98,11 @@ function InitializeSetup(): Boolean;
 begin
   WasInstalled := FileExists(ExpandConstant('{localappdata}\Programs\LabelPrinterAgent\LabelPrinterAgent.exe'));
   Result := True;
+end;
+
+function IsSelfUpdate(): Boolean;
+begin
+  Result := ExpandConstant('{param:UPDATE|0}') = '1';
 end;
 
 function AgentExe(): String;

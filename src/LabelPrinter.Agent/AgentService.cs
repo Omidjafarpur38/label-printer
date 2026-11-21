@@ -36,6 +36,8 @@ internal sealed class AgentService(AgentHost host, IPlatform platform, FileLog l
     private volatile bool _erpReachable = true;
     private DateTimeOffset? _lastCleanAt;
 
+    /// <summary>Update check/install (docs/auto-update.md). Replaceable before start, for tests.</summary>
+    public UpdateService Updates { get; internal set; } = new(host, platform, log, UpdateOptions.Production());
     public AgentHost Host => host;
     public IPlatform Platform => platform;
     public FileLog Log => log;
@@ -333,5 +335,5 @@ internal sealed class AgentService(AgentHost host, IPlatform platform, FileLog l
         return new(true, enabled ? "از این به بعد با ورود به ویندوز بدون پنجره اجرا می‌شود." : "اجرا با ویندوز خاموش شد.");
     }
 
-    public void Dispose() => StopWorker();
+    public void Dispose() { StopWorker(); Updates.Dispose(); }
 }

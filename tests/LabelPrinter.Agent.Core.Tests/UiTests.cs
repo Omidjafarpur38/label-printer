@@ -24,6 +24,9 @@ internal sealed class TestPlatform : IPlatform
     public bool AutostartEnabled => Autostart;
     public void SetAutostart(bool enabled) => Autostart = enabled;
     public void OpenWindow(string url, string profileDir) { }
+    public List<(string Path, string Args)> Installers { get; } = [];
+    public bool LaunchResult { get; set; } = true;
+    public bool LaunchInstaller(string path, string arguments) { Installers.Add((path, arguments)); return LaunchResult; }
 }
 
 /// <summary>The control panel end to end: real HTTP to the panel, real worker, mock ERP over sockets, fake spooler.</summary>

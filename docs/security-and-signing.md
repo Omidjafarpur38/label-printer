@@ -21,6 +21,18 @@
 - The program never asks for administrator rights (`asInvoker` manifest), is per-user, and is not packed,
   trimmed or obfuscated (packers are a common cause of antivirus false positives).
 
+## "Non-commercial" does not remove the need to be signed
+Windows and antivirus products do not look at whether a program is commercial. SmartScreen and "unknown publisher"
+depend only on whether the file carries a trusted publisher signature and on its download reputation. Calling the
+program non-commercial changes neither. What *does* help a non-commercial open-source project is a **free signing
+programme for open-source projects** (these usually require a public repository with an OSI-approved licence;
+this repository currently has no `LICENSE` file), or a low-cost certificate. Until one is used, the installer
+stays honestly "unsigned".
+
+Auto-update does not depend on that signature: updates carry their own signature (`docs/auto-update.md`), and a
+file the program downloads itself carries no "downloaded from the internet" mark, so SmartScreen normally does not
+prompt for it. Antivirus may still scan it like any file.
+
 ## Code signing (not done, and why)
 An Authenticode signature needs a code-signing certificate issued to a verified publisher. That is a purchase
 and an identity check that only the owner can make; no tool here can create a trusted one, and a self-signed
